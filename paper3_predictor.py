@@ -109,26 +109,35 @@ def CNN3(num_kernels1 = 64, num_kernels2 = 64,num_kernels3 = 64,kernel_size=5,wi
     x = Conv1D(num_kernels3, kernel_size, activation='relu', padding = 'same', kernel_regularizer=l1(l1_coef))(x)
     x = MaxPooling1D(pool_size=2)(x)
     x = Flatten()(x)
-    output  = TimeDistributed(window_size, activation = 'linear')(x)
+    output = Dense(window_size, activation='linear')(x)
 
     model = Model(inputs,output)
     model.compile(optimizer = AdamW(learning_rate = alpha), loss="mse", metrics=['mae'])
     return model
 
-
-def CNN2_LSTM(num_hiddens=64, num_kernels1 = 64, num_kernels2 = 64,kernel_size=5,window_size_in=30, window_size=30, alpha=0.001, l1_coef = 0.01):
+# CNN + LSTM Model with L1 regularization
+def CNN2_LSTM(num_hiddens=64, num_kernels1=64, num_kernels2=64, kernel_size=5, window_size_in=30, window_size=30, alpha=0.001, l1_coef=0.01):
     inputs = Input(shape=X_CNN.shape[1:])
-    x = Conv1D(num_kernels1, kernel_size, activation='relu', padding = 'same', kernel_regularizer=l1(l1_coef))(inputs)
+    # First convolutional block
+    x = Conv1D(num_kernels1, kernel_size, activation='relu', padding='same', kernel_regularizer=l1(l1_coef))(inputs)
     x = MaxPooling1D(pool_size=2)(x)
-    x = Conv1D(num_kernels2, kernel_size, activation='relu', padding = 'same', kernel_regularizer=l1(l1_coef))(x)
+    # Second convolutional block
+    x = Conv1D(num_kernels2, kernel_size, activation='relu', padding='same', kernel_regularizer=l1(l1_coef))(x)
     x = MaxPooling1D(pool_size=2)(x)
-    x = LSTM(num_hiddens, return_sequences = True, kernel_regularizer=l1(l1_coef))(x)
-    x = Flatten()(x)
-    output  = TimeDistributed(window_size, activation = 'linear')(x)
+    # LSTM layer
+    x = LSTM(num_hiddens, return_sequences=True, kernel_regularizer=l1(l1_coef))(x)
+    # x = Flatten()(x)
+    # Output layer - change this part to use a proper Dense layer
+    output = Dense(window_size, activation='linear')(x)
 
-    model = Model(inputs,output)
-    model.compile(optimizer = AdamW(learning_rate = alpha), loss="mse", metrics=['mae'])
+    model = Model(inputs, output)
+    model.compile(optimizer=AdamW(learning_rate=alpha), loss="mse", metrics=['mae'])
     return model
 
+estimator1 = CNN3()
+estimator2 = CNN2_LSTM()
 
-estimator = CNN3()
+estimator1.summary()
+estimator2.summary()
+
+
