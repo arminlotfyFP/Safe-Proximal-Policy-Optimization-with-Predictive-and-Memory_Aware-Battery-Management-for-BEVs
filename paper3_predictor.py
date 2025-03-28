@@ -101,13 +101,13 @@ def LSTM3(num_hiddens = 64,window_size_in=30, window_size=30, alpha=0.001, l1_co
     return model
 
 def CNN3(num_kernels1 = 64, num_kernels2 = 64,num_kernels3 = 64,kernel_size=5,window_size_in=30, window_size=30, alpha=0.001, l1_coef = 0.01):
-    inputs = Input(shape=(window_size_in,1))
+    inputs = Input(shape=X_CNN.shape[1:])
     x = Conv1D(num_kernels1, kernel_size, activation='relu', padding = 'same', kernel_regularizer=l1(l1_coef))(inputs)
-    x = MaxPooling1D(x)
+    x = MaxPooling1D(pool_size=2)(x)
     x = Conv1D(num_kernels2, kernel_size, activation='relu', padding = 'same', kernel_regularizer=l1(l1_coef))(x)
-    x = MaxPooling1D(x)
+    x = MaxPooling1D(pool_size=2)(x)
     x = Conv1D(num_kernels3, kernel_size, activation='relu', padding = 'same', kernel_regularizer=l1(l1_coef))(x)
-    x = MaxPooling1D(x)
+    x = MaxPooling1D(pool_size=2)(x)
     x = Flatten(x)
     output  = TimeDistributed(window_size, activation = 'linear')(x)
 
@@ -117,11 +117,11 @@ def CNN3(num_kernels1 = 64, num_kernels2 = 64,num_kernels3 = 64,kernel_size=5,wi
 
 
 def CNN2_LSTM(num_hiddens=64, num_kernels1 = 64, num_kernels2 = 64,kernel_size=5,window_size_in=30, window_size=30, alpha=0.001, l1_coef = 0.01):
-    inputs = Input(shape=(window_size_in,1))
+    inputs = Input(shape=X_CNN.shape[1:])
     x = Conv1D(num_kernels1, kernel_size, activation='relu', padding = 'same', kernel_regularizer=l1(l1_coef))(inputs)
-    x = MaxPooling1D(x)
+    x = MaxPooling1D(pool_size=2)(x)
     x = Conv1D(num_kernels2, kernel_size, activation='relu', padding = 'same', kernel_regularizer=l1(l1_coef))(x)
-    x = MaxPooling1D(x)
+    x = MaxPooling1D(pool_size=2)(x)
     x = LSTM(num_hiddens, return_sequences = True, kernel_regularizer=l1(l1_coef))(x)
     x = Flatten(x)
     output  = TimeDistributed(window_size, activation = 'linear')(x)
@@ -129,3 +129,6 @@ def CNN2_LSTM(num_hiddens=64, num_kernels1 = 64, num_kernels2 = 64,kernel_size=5
     model = Model(inputs,output)
     model.compile(optimizer = AdamW(learning_rate = alpha), loss="mse", metrics=['mae'])
     return model
+
+
+estimator = CNN3()
