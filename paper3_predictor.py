@@ -43,14 +43,27 @@ plt.plot(X_train_n)
 plt.plot(X_train_n1)
 plt.show()
 
+# Data shape Designing:
+# Y_train_CNN = Y_train.reshape(-1,1)
+num_features = X_train_n1.shape[1]
+window_size = 30
+X_CNN = np.zeros([X_train_n1.shape[0]-window_size,window_size,num_features])
+Y_CNN = np.zeros([X_train_n1.shape[0]-window_size,window_size,1])
 
+X_CNN_test = np.zeros([X_test_n1.shape[0]-window_size,window_size,num_features])
+Y_CNN_test = np.zeros([X_test_n1.shape[0]-window_size,window_size,1])
 
+for i in range(X_train_n1.shape[0]-window_size):
+    X_CNN[i,0:window_size,:] = X_train_n1[i:i+window_size,:]
 
+for i in range(X_train_n1.shape[0]-2*window_size):   
+    Y_CNN[i,:,0] = Y_train[i+window_size:i+window_size*2]
 
+for i in range(X_test_n1.shape[0]-window_size):
+    X_CNN_test[i,0:window_size,:] = X_test_n1[i:i+window_size,:]
 
-
-
-
+for i in range(X_test_n1.shape[0]-2*window_size):   
+    Y_CNN_test[i,:,0] = Y_test[i+window_size:i+window_size*2]
 
 
 # Model designing
@@ -72,7 +85,7 @@ def NN3(num_hiddens = 64,window_size_in=30, window_size=30, alpha=0.001, l1_coef
     output  = TimeDistributed(window_size, activation = 'linear')(in3)
 
     model = Model(inputs,output)
-    model.compile(optimizer = AdamW(learning_rate = alpha), loss="mse")
+    model.compile(optimizer = AdamW(learning_rate = alpha), loss="mse", metrics=['mae'])
     return model
 
 def LSTM3(num_hiddens = 64,window_size_in=30, window_size=30, alpha=0.001, l1_coef = 0.01):
@@ -84,7 +97,7 @@ def LSTM3(num_hiddens = 64,window_size_in=30, window_size=30, alpha=0.001, l1_co
     output  = TimeDistributed(window_size, activation = 'linear')(x)
 
     model = Model(inputs,output)
-    model.compile(optimizer = AdamW(learning_rate = alpha), loss="mse")
+    model.compile(optimizer = AdamW(learning_rate = alpha), loss="mse", metrics=['mae'])
     return model
 
 def CNN3(num_kernels1 = 64, num_kernels2 = 64,num_kernels3 = 64,kernel_size=5,window_size_in=30, window_size=30, alpha=0.001, l1_coef = 0.01):
@@ -99,7 +112,7 @@ def CNN3(num_kernels1 = 64, num_kernels2 = 64,num_kernels3 = 64,kernel_size=5,wi
     output  = TimeDistributed(window_size, activation = 'linear')(x)
 
     model = Model(inputs,output)
-    model.compile(optimizer = AdamW(learning_rate = alpha), loss="mse")
+    model.compile(optimizer = AdamW(learning_rate = alpha), loss="mse", metrics=['mae'])
     return model
 
 
@@ -114,5 +127,5 @@ def CNN2_LSTM(num_hiddens=64, num_kernels1 = 64, num_kernels2 = 64,kernel_size=5
     output  = TimeDistributed(window_size, activation = 'linear')(x)
 
     model = Model(inputs,output)
-    model.compile(optimizer = AdamW(learning_rate = alpha), loss="mse")
+    model.compile(optimizer = AdamW(learning_rate = alpha), loss="mse", metrics=['mae'])
     return model
