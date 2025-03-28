@@ -108,7 +108,7 @@ def CNN3(num_kernels1 = 64, num_kernels2 = 64,num_kernels3 = 64,kernel_size=5,wi
     x = MaxPooling1D(pool_size=2)(x)
     x = Conv1D(num_kernels3, kernel_size, activation='relu', padding = 'same', kernel_regularizer=l1(l1_coef))(x)
     x = MaxPooling1D(pool_size=2)(x)
-    x = Flatten(x)
+    x = Flatten()(x)
     output  = TimeDistributed(window_size, activation = 'linear')(x)
 
     model = Model(inputs,output)
@@ -123,7 +123,7 @@ def CNN2_LSTM(num_hiddens=64, num_kernels1 = 64, num_kernels2 = 64,kernel_size=5
     x = Conv1D(num_kernels2, kernel_size, activation='relu', padding = 'same', kernel_regularizer=l1(l1_coef))(x)
     x = MaxPooling1D(pool_size=2)(x)
     x = LSTM(num_hiddens, return_sequences = True, kernel_regularizer=l1(l1_coef))(x)
-    x = Flatten(x)
+    x = Flatten()(x)
     output  = TimeDistributed(window_size, activation = 'linear')(x)
 
     model = Model(inputs,output)
