@@ -1,1273 +1,407 @@
-
-import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
-from scipy.signal import butter, filtfilt
-# import mat73
 import os
-import scipy.io as sio   #---> import matfile
-
-import gymnasium as gym
-import gymnasium.spaces as spaces
-from   gymnasium import Env
-from gymnasium.wrappers import NormalizeObservation, NormalizeReward
-from collections import deque  # progress is tqdm
-
-os.getcwd()
+import copy
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+import matplotlib.pyplot as plt
+import mat73
+import h5py
+import scipy.io as scipy
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.model_selection import train_test_split
+print(os.getcwd())
 os.chdir("/home/armin/Desktop/paper3_python/paper3_py")
 
 
-# Data preparation:
-data = sio.loadmat('i_dc_estimate.mat')
-data1 = sio.loadmat('I_UDDS.mat')
-i_dc1_estimate = data['i_dc_estimate'].transpose().flatten()
-i_dc2_estimate = data1['I_UDDS'].transpose().flatten()
-i_dc_estimate = np.concatenate((i_dc1_estimate, i_dc2_estimate), axis=0)
-i_dc_future = np.roll(i_dc_estimate, -30)
-i_dc_future_mean = np.zeros_like(i_dc_future)
+<<<<<<< HEAD
+data = mat73.loadmat('data.mat')
+=======
+# data = mat73.loadmat('data.mat')
+>>>>>>> aabf279 (All files)
+data = scipy.loadmat('data.mat')
 
-for i in range(len(i_dc_future) - 30):
-    i_dc_future_mean[i] = i_dc_future[i:i+30].mean()
+data = data["data"]
+X = np.delete(data, [6,9,11], axis=1)
+Y = data[:,4]
 
-# Define a low-pass Butterworth filter function
 
-# def butter_lowpas_filter(i_input, cutoff,fs,order=1):
-#     nyq = 0.5 * fs
-#     normal_cutoff = cutoff / nyq
-#     b, a = butter(order, normal_cutoff, btype='low', analog=False)
-#     y = filtfilt(b, a, i_input)
-#     return y
 
-# filtered_i = butter_lowpas_filter(i_dc_estimate, 0.00637, 1, order=1)
+MM = MinMaxScaler()
+X_train, X_test, Y_train, Y_test = train_test_split(X,Y, test_size=0.2, shuffle=False)
+X_train_n = MM.fit_transform(X_train)
+X_test_n = MM.transform(X_test)
 
-# plt.figure(figsize=(10, 6))
-# plt.plot(i_dc_estimate, label='Original Signal', color='blue')
-# plt.plot(filtered_i, label='Filtered Signal', color='red')
-# plt.title('Low-pass Filtered Signal')
-# plt.xlabel('Sample Number')
-# plt.ylabel('Amplitude')
-# plt.legend()
-# plt.grid()
+SC = StandardScaler()
+X_train_n1 = SC.fit_transform(X_train)
+X_test_n1 = SC.transform(X_test)
+
+
+# Feature engineering
+<<<<<<< HEAD
+variance = X_train_n.var(axis=0)
+print([variance > 0.01])
+
+features = np.ones([1,X_train_n.shape[1]])
+selected_features = (variance.reshape(1,-1) > 0.01).astype(int)
+fig, ax = plt.subplots()
+plt.plot(X_train_n)
+plt.plot(X_train_n1)
+plt.show()
+=======
+# variance = X_train_n.var(axis=0)
+# print([variance > 0.01])
+
+features = np.ones([1,X_train_n.shape[1]])
+selected_features = (variance.reshape(1,-1) > 0.01).astype(int)
+# fig, ax = plt.subplots()
+# plt.plot(X_train_n)
+# plt.plot(X_train_n1)
 # plt.show()
+>>>>>>> aabf279 (All files)
 
-# plt.figure(figsize=(10, 6))
-# plt.plot(i_dc_estimate, label='Original Signal', color='blue')
-# plt.plot(i_dc_future_mean, label='Filtered Signal', color='red')
-# plt.title('Low-pass Filtered Signal')
-# plt.xlabel('Sample Number')
-# plt.ylabel('Amplitude')
-# plt.legend()
-# plt.grid()
-# plt.show()
+# Data shape Designing:
+# Y_train_CNN = Y_train.reshape(-1,1)
+num_features = X_train_n1.shape[1]
+window_size = 30
+X_CNN = np.zeros([X_train_n1.shape[0]-window_size,window_size,num_features])
+Y_CNN = np.zeros([X_train_n1.shape[0]-window_size,window_size,1])
+
+X_CNN_test = np.zeros([X_test_n1.shape[0]-window_size,window_size,num_features])
+Y_CNN_test = np.zeros([X_test_n1.shape[0]-window_size,window_size,1])
+
+for i in range(X_train_n1.shape[0]-window_size):
+    X_CNN[i,0:window_size,:] = X_train_n1[i:i+window_size,:]
+
+for i in range(X_train_n1.shape[0]-2*window_size):   
+    Y_CNN[i,:,0] = Y_train[i+window_size:i+window_size*2]
+
+for i in range(X_test_n1.shape[0]-window_size):
+    X_CNN_test[i,0:window_size,:] = X_test_n1[i:i+window_size,:]
+
+for i in range(X_test_n1.shape[0]-2*window_size):   
+    Y_CNN_test[i,:,0] = Y_test[i+window_size:i+window_size*2]
 
 
-max_current = 2.0
-min_current = -2.0
+# Model designing
+import tensorflow
+from tensorflow import keras
+from keras import Model
+from keras.layers import Dense, LSTM, GRU, Conv1D, Input, MaxPooling1D, Dropout, Flatten, TimeDistributed
+from keras.optimizers import Adam, AdamW, SGD
+from keras.regularizers import l1
 
-# Define Battery & SC
 
-class Supercapacitor:
-    def __init__(self, C=500, R_esr=0.01, V_init=2.7, dt=1.0):
-        self.C = C                # Farads
-        self.R_esr = R_esr        # Ohms
-        self.V_sc = V_init        # Initial voltage (V)
-        self.dt = dt              # Time step (seconds)
 
-    def step(self, I_sc):
-        # Update the supercapacitor voltage (ideal)
-        self.V_sc -= (I_sc * self.dt) / self.C
-        # Terminal voltage with ESR drop
-        V_out = self.V_sc - I_sc * self.R_esr
-        return V_out, self.V_sc
+
+<<<<<<< HEAD
+def NN3(num_hiddens = 64,window_size_in=30, window_size=30, alpha=0.001, l1_coef = 0.01):
+    inputs  = Input(shape=(window_size_in,1))
+    in1     = Dense(num_hiddens, activation = 'relu', kernel_regularizer=l1(l1_coef))(inputs)
+    in2     = Dense(num_hiddens, activation = 'relu', kernel_regularizer=l1(l1_coef))(in1)
+    in3     = Dense(num_hiddens, activation = 'relu', kernel_regularizer=l1(l1_coef))(in2)
+    output  = TimeDistributed(window_size, activation = 'linear')(in3)
+
+    model = Model(inputs,output)
+    model.compile(optimizer = AdamW(learning_rate = alpha), loss="mse", metrics=['mae'])
+    return model
+
+def LSTM3(num_hiddens = 64,window_size_in=30, window_size=30, alpha=0.001, l1_coef = 0.01):
+    inputs = Input(shape=(window_size_in,1))
+    x = LSTM(num_hiddens, return_sequences = True, kernel_regularizer=l1(l1_coef))(inputs)
+    x = LSTM(num_hiddens, return_sequences = True, kernel_regularizer=l1(l1_coef))(x)
+    x = LSTM(num_hiddens, return_sequences = True, kernel_regularizer=l1(l1_coef))(x)
+    x = Flatten(x)
+    output  = TimeDistributed(window_size, activation = 'linear')(x)
+
+    model = Model(inputs,output)
+    model.compile(optimizer = AdamW(learning_rate = alpha), loss="mse", metrics=['mae'])
+    return model
+
+=======
+def NN3(num_hiddens1=64,num_hiddens2=64,num_hiddens3=64, window_size_in=30, window_size=30, alpha=0.001, l1_coef=0.01):
+    inputs = Input(shape=(330, ))
+    x = Dense(num_hiddens1, activation='relu', kernel_regularizer=l1(l1_coef))(inputs)
+    x = Dense(num_hiddens2, activation='relu', kernel_regularizer=l1(l1_coef))(x)
+    x = Dense(num_hiddens3, activation='relu', kernel_regularizer=l1(l1_coef))(x)
+    output = Dense(window_size, activation='linear')(x)
+
+    model = Model(inputs, output)
+    model.compile(optimizer=AdamW(learning_rate=alpha), loss='mse', metrics=['mae'])
+    return model
+
+
+from keras.models import Model
+from keras.layers import Input, LSTM, Dense, Flatten
+from keras.regularizers import l1
+from keras.optimizers import Adam
+from tensorflow_addons.optimizers import AdamW  # Ensure you have this installed
+
+def LSTM3(num_hiddens1=64,num_hiddens2=64,num_hiddens3=64, window_size_in=30, window_size=30, alpha=0.001, l1_coef=0.01):
+    inputs = Input(shape=(window_size_in, 11))
+    x = LSTM(num_hiddens1, return_sequences=True, kernel_regularizer=l1(l1_coef))(inputs)
+    x = LSTM(num_hiddens2, return_sequences=True, kernel_regularizer=l1(l1_coef))(x)
+    x = LSTM(num_hiddens3, return_sequences=True, kernel_regularizer=l1(l1_coef))(x)
+    x = Flatten()(x)
+    output = Dense(window_size, activation='linear')(x)
+    model = Model(inputs, output)
+    model.compile(optimizer=AdamW(learning_rate=alpha), loss='mse', metrics=['mae'])
+
+    return model
+
+
+>>>>>>> aabf279 (All files)
+def CNN3(num_kernels1 = 64, num_kernels2 = 64,num_kernels3 = 64,kernel_size=5,window_size_in=30, window_size=30, alpha=0.001, l1_coef = 0.01):
+    inputs = Input(shape=X_CNN.shape[1:])
+    x = Conv1D(num_kernels1, kernel_size, activation='relu', padding = 'same', kernel_regularizer=l1(l1_coef))(inputs)
+    x = MaxPooling1D(pool_size=2)(x)
+    x = Conv1D(num_kernels2, kernel_size, activation='relu', padding = 'same', kernel_regularizer=l1(l1_coef))(x)
+    x = MaxPooling1D(pool_size=2)(x)
+    x = Conv1D(num_kernels3, kernel_size, activation='relu', padding = 'same', kernel_regularizer=l1(l1_coef))(x)
+    x = MaxPooling1D(pool_size=2)(x)
+    x = Flatten()(x)
+    output = Dense(window_size, activation='linear')(x)
+
+    model = Model(inputs,output)
+    model.compile(optimizer = AdamW(learning_rate = alpha), loss="mse", metrics=['mae'])
+    return model
+
+# CNN + LSTM Model with L1 regularization
+def CNN2_LSTM(num_hiddens=64, num_kernels1=64, num_kernels2=64, kernel_size=5, window_size_in=30, window_size=30, alpha=0.001, l1_coef=0.01):
+    inputs = Input(shape=X_CNN.shape[1:])
+<<<<<<< HEAD
+    # First convolutional block
+    x = Conv1D(num_kernels1, kernel_size, activation='relu', padding='same', kernel_regularizer=l1(l1_coef))(inputs)
+    x = MaxPooling1D(pool_size=2)(x)
+    # Second convolutional block
+    x = Conv1D(num_kernels2, kernel_size, activation='relu', padding='same', kernel_regularizer=l1(l1_coef))(x)
+    x = MaxPooling1D(pool_size=2)(x)
+    # LSTM layer
+    x = LSTM(num_hiddens, return_sequences=True, kernel_regularizer=l1(l1_coef))(x)
+=======
+    x = Conv1D(num_kernels1, kernel_size, activation='relu', padding='same', kernel_regularizer=l1(l1_coef))(inputs)
+    x = MaxPooling1D(pool_size=2)(x)
+    x = Conv1D(num_kernels2, kernel_size, activation='relu', padding='same', kernel_regularizer=l1(l1_coef))(x)
+    x = MaxPooling1D(pool_size=2)(x)
+    x = LSTM(num_hiddens, return_sequences=False, kernel_regularizer=l1(l1_coef))(x)
+>>>>>>> aabf279 (All files)
+    # x = Flatten()(x)
+    # Output layer - change this part to use a proper Dense layer
+    output = Dense(window_size, activation='linear')(x)
+
+    model = Model(inputs, output)
+    model.compile(optimizer=AdamW(learning_rate=alpha), loss="mse", metrics=['mae'])
+    return model
+
+<<<<<<< HEAD
+estimator1 = CNN3()
+estimator2 = CNN2_LSTM()
+
+estimator1.summary()
+estimator2.summary()
+
+
+=======
+# estimator1 = NN3()
+# estimator2 = LSTM3()
+# estimator3 = CNN3()
+# estimator4 = CNN2_LSTM()
+
+# # estimator1.summary()
+# # estimator2.summary()
+# # estimator3.summary()
+# # estimator4.summary()
+
+# # # Training
+# # history1 = estimator1.fit(X_CNN.reshape(17099,30*11), Y_CNN, epochs=500, batch_size=32, validation_split=0.2)
+# # history2 = estimator2.fit(X_CNN, Y_CNN, epochs=500, batch_size=32, validation_split=0.2)
+# # history3 = estimator3.fit(X_CNN, Y_CNN, epochs=500, batch_size=32, validation_split=0.2)
+# # history4 = estimator4.fit(X_CNN, Y_CNN, epochs=500, batch_size=32, validation_split=0.2)
+
+
+################################## Optuna
+# import optuna
+# from keras.callbacks import EarlyStopping
+
+# early_stop = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
+
+
+# def objective(trial,estimator):
+#     window_size_in = 30
+#     window_size = 30
+#     if estimator== "CNN3":
+#         num_kernels1 = trial.suggest_int('num_kernels1', 32, 128)
+#         num_kernels2 = trial.suggest_int('num_kernels2', 32, 128)
+#         num_kernels3 = trial.suggest_int('num_kernels3', 32, 128)
+#         kernel_size  = trial.suggest_int('kernel_size', 3, 7)
+#     elif estimator== "CNN2_LSTM":
+#         num_kernels1 = trial.suggest_int('num_kernels1', 32, 128)
+#         num_kernels2 = trial.suggest_int('num_kernels2', 32, 128)
+#         kernel_size = trial.suggest_int('kernel_size', 3, 7)
+#         num_hiddens = trial.suggest_int('num_hiddens', 32, 128)
+#     else:
+#         num_hiddens1 = trial.suggest_int('num_hiddens1', 32, 128)
+#         num_hiddens2 = trial.suggest_int('num_hiddens2', 32, 128)
+#         num_hiddens3 = trial.suggest_int('num_hiddens3', 32, 128)
     
 
+#     alpha   = trial.suggest_loguniform('alpha', 1e-5, 1e-2)
+#     l1_coef = trial.suggest_loguniform('l1_coef', 1e-5, 1e-2)
+
+#     # Create the model with the suggested hyperparameters
+#     if estimator == "CNN3":
+#         model = CNN3(num_kernels1=num_kernels1, num_kernels2=num_kernels2, num_kernels3=num_kernels3,
+#                         kernel_size=kernel_size, window_size_in=window_size_in, window_size=window_size,
+#                         alpha=alpha, l1_coef=l1_coef)
+#         history = model.fit(X_CNN, Y_CNN, epochs=500, batch_size=32, validation_split=0.2, callbacks=[early_stop])
+
+#     elif estimator == "CNN2_LSTM":
+#         model = CNN2_LSTM(num_hiddens=num_hiddens, num_kernels1=num_kernels1, num_kernels2=num_kernels2,
+#                         kernel_size=kernel_size, window_size_in=window_size_in, window_size=window_size,
+#                         alpha=alpha, l1_coef=l1_coef)
+#         history = model.fit(X_CNN, Y_CNN, epochs=500, batch_size=32, validation_split=0.2, callbacks=[early_stop])
+
+#     elif estimator == "LSTM3":
+#         model = LSTM3(num_hiddens1=num_hiddens1, num_hiddens2=num_hiddens2, num_hiddens3=num_hiddens3,
+#                         window_size_in=window_size_in, window_size=window_size,
+#                         alpha=alpha, l1_coef=l1_coef)
+#         history = model.fit(X_CNN, Y_CNN, epochs=500, batch_size=32, validation_split=0.2, callbacks=[early_stop])
+
+#     else:
+#         # For NN3
+#         model = NN3(num_hiddens1=num_hiddens1, num_hiddens2=num_hiddens2, num_hiddens3=num_hiddens3,
+#                         window_size_in=window_size_in, window_size=window_size,
+#                         alpha=alpha, l1_coef=l1_coef)
+#         history = model.fit(X_CNN.reshape(17099,30*11), Y_CNN, epochs=500, batch_size=32, validation_split=0.2, callbacks=[early_stop])
+
+#     val_loss = history.history['val_loss'][-1]
+#     # val_mae = history.history['val_mae'][-1]
+
+#     return val_loss
 
 
-class ECM_RC_Battery:
-    def __init__(self, Q_init=3.2, alpha=0.0002, R0=0.01, R1=0.02, C1=2500, dt=1, Vmin=2.5, Vmax=4.2):
-        self.Q_init = Q_init          # Initial capacity (Ah)
-        self.alpha = alpha            # Capacity fade rate per cycle
-        self.R0 = R0                  # Ohm, series resistance
-        self.R1 = R1                  # Ohm, RC branch resistance
-        self.C1 = C1                  # Farad, RC branch capacitance
-        self.dt = dt                  # Simulation timestep (seconds)
-        self.Vmin = Vmin              # Minimum voltage
-        self.Vmax = Vmax              # Maximum voltage
+# NNt = {"NN3":NN3, "LSTM3":LSTM3, "CNN3":CNN3, "CNN2_LSTM":CNN2_LSTM}
 
-        # State variables
-        self.Q = Q_init               # Current capacity (Ah)
-        self.SOC = 1.0                # Initial SOC (1.0 = 100%)
-        self.V_RC = 0                 # Initial RC voltage
-        self.cycle_count = 0          # Number of full cycles (for capacity fade)
-
-    def voc(self, soc):
-        """Simple linear OCV model, replace with lookup for real battery."""
-        return self.Vmin + soc * (self.Vmax - self.Vmin)
-
-    def step(self, I_bat):
-        # Update RC branch (discretized)
-        dV_RC = (-self.V_RC / (self.R1 * self.C1) + I_bat / self.C1) * self.dt
-        self.V_RC += dV_RC
-
-        # SOC update
-        self.SOC -= (I_bat * self.dt) / (self.Q * 3600)  # Convert Ah to As
-
-        # Enforce SOC limits
-        self.SOC = np.clip(self.SOC, 0.0, 1.0)
-
-        # Terminal voltage
-        V_oc = self.voc(self.SOC)
-        V_bat = V_oc - I_bat * self.R0 - self.V_RC
-
-        # Capacity fade update (increment by one cycle if fully charged/discharged)
-        if self.SOC == 0 or self.SOC == 1.0:
-            self.cycle_count += 1
-            self.Q = self.Q_init * (1 - self.alpha * self.cycle_count)
-        else:
-            self.Q = self.Q - (I_bat * self.dt) / 3600 if I_bat< 3*self.Q else self.Q - 3*((I_bat * self.dt) / 3600) # Update capacity based on discharge
-        self.Q = max(self.Q, 0.0)
-
-        return V_bat, self.SOC, self.Q, self.V_RC
-
-min_current = -np.min(i_dc_estimate)    #########################
-max_current =  np.max(i_dc_estimate)    #########################
-# Define my GymEnvironment:
-# input_current, future_current, battery_current, SC_current, battery_capacity,battery_SOC, SC_voltage
-class MyGymEnv(Env):
-    def __init__(self, config=None):
-        super().__init__()
-        config = config or {}
-        self.i_dc_estimate      = config.get("i_dc_estimate", np.zeros(1000))
-        self.i_dc_future        = config.get("i_dc_future", np.zeros(1000))
-        self.max_steps          = config.get("max_steps", 8000)
-        # shuffle_indices         = np.random.permutation(len(self.i_dc_estimate_org))  # get shuffled order
-        # self.i_dc_estimate      = self.i_dc_estimate_org[shuffle_indices]
-        # self.i_dc_future        = self.i_dc_future_org[shuffle_indices] 
-        
-        self.observation_space = spaces.Box(low=np.array([-1.5, -1.5, -1.5, -1.5, 0, 0, 0]), 
-                                            high=np.array([1.5, 1.5, 1.5, 1.5, 1, 1, 1]), 
-                                            shape=(7,), dtype=np.float32
-)
-        
-        self.action_space       = spaces.Box(low=-np.array([min_current,min_current]), 
-                                            high=np.array([max_current,max_current]), shape=(2,), dtype=np.float32)
-        
-        self.input_current      = self.i_dc_estimate[0] + 10* np.random.uniform(-1, 1)
-        self.output_current     = []
-        self.future_current     = self.i_dc_future[0]   + 10* np.random.uniform(-1, 1)
-        
-
-        # Deining Buffers
-        self.buffer = deque(maxlen=60)
-        self.current_buffer = deque(maxlen=10)
-
-        # History
-        self.dt                 = 0.1
-        self.V_hist             = []
-        self.SOC_hist           = []
-        self.Q_hist             = []
-        self.V_SC_hist          = []
-        self.battery_I_hist     = []
-        self.SC_I_hist          = []
-        self.requested_I_hist   = []
-        self.provided_I_hist    = []
-        self.reward             = []
-
-        # Battery
-        self.battery_current    = 0
-        self.battery_capacity   = 3.2 + 0.1 * np.random.uniform(-1, 1)
-        self.battery_SOC        = 0.60  + 0.20  * np.random.uniform(-1, 1)
-        self.battery_voltage    = 2.5 + self.battery_SOC  * (3.1 - 2.5)
-        self.n_batt_par         = 22
-        self.n_batt_seri        = 60
-        self.fading_coefficient = 2e-8  # alpha 2 coeff for derivative
-        self.R0                 = 0.03
-        self.R1                 = 0.04
-        self.C1                 = 750
-        # SC
-        self.C_n_seri           = 7
-        self.SC_current         = 0
-        self.SC_voltage         = (np.random.uniform(9,16))
-        self.end_counter        = self.max_steps
-        self.SC_C               = 58
-        self.R_esr              = 22e-3
-        
+# print(f"Network is {"CNN2_LSTM"}")
+# study = optuna.create_study(direction='minimize')
+# study.optimize(lambda trial: objective(trial, estimator="CNN2_LSTM"), n_trials=50)
+# print("Best hyperparameters: ", study.best_params)
+# print("Best trial: ", study.best_trial)
+# print("Best value: ", study.best_value)
 
 
-        self.terminated         = False
-        self.truncated          = False
-        self.info               = {}
-        self.step_count         = 0
-        # Defining Models
-        self.battery    = ECM_RC_Battery(Q_init=self.battery_capacity, alpha=self.fading_coefficient, R0=self.R0, R1=self.R1, C1=self.C1, dt=self.dt, Vmin=2.5, Vmax=4.0)
-        self.sc         = Supercapacitor(C=self.SC_C, R_esr=self.R_esr, V_init=self.SC_voltage , dt=self.dt)
-        
+# import csv
 
-    def reset(self, *, seed=None, options=None):
-        super().reset(seed=seed)
+# # Example dictionary (Optuna's best_params)
+# best_params = study.best_params  # This must be a dictionary
 
-        # shuffle_indices         = np.random.permutation(len(self.i_dc_estimate))  # ############
-        # self.i_dc_estimate      = self.i_dc_estimate[shuffle_indices]               #######################
-        # self.i_dc_future        = self.i_dc_future[shuffle_indices]             #######################
+# # Write to CSV
+# with open('best_params.csv', 'w', newline='') as f:
+#     writer = csv.writer(f)
+#     writer.writerow(['Parameter', 'Value'])  # Optional header
+#     for key, value in best_params.items():
+#         writer.writerow([key, value])
+#########################################################################################################
+# Load the best parameters from the CSV file
+import csv
 
-        self.start_idx          = np.random.randint(0, len(self.i_dc_estimate) - 100)                   ############
-        self.input_current      = self.i_dc_estimate[self.start_idx] + 10* np.random.uniform(-1, 1) #################
-        self.future_current     = self.i_dc_future[self.start_idx]   + 10* np.random.uniform(-1, 1) #################
-        self.output_current     = []
+params_NN = {}
+params_LSTM = {}
+params_CNN = {}
+params_CNN_LSTM = {}
 
-        self.battery_current    = 0
-        self.battery_capacity   = 3.2 + 0.1 * np.random.uniform(-1, 1)
-        self.battery_SOC        = 0.60  + 0.20  * np.random.uniform(-1, 1)
-        self.battery_voltage    = 2.5 + self.battery_SOC  * (3.1 - 2.5)
+with open('best_params_NN3.csv', 'r') as file:
+    reader = csv.reader(file)
+    # next(reader)  # Skip header
+    for row in reader:
+        key, value = row
+        params_NN[key] = float(value) 
 
-        self.buffer.clear()
-        self.current_buffer.clear()
+with open('best_params_LSTM.csv', 'r') as file:
+    reader = csv.reader(file)
+    next(reader)  # Skip header
+    for row in reader:
+        key, value = row
+        params_LSTM[key] = float(value) 
 
-        self.SC_C               = 58
-        self.R_esr              = 22e-3
-        self.C_n_seri           = 7
-        self.SC_current         = 0
-        self.SC_voltage         = (np.random.uniform(9,16))
-        self.terminated         = False
-        self.truncated          = False
-        self.info               = {}
-        self.step_count         = 0
+with open('best_params_CNN3.csv', 'r') as file:
+    reader = csv.reader(file)
+    next(reader)  # Skip header
+    for row in reader:
+        key, value = row
+        params_CNN[key] = float(value) 
 
-        self.battery    = ECM_RC_Battery(Q_init=self.battery_capacity, alpha=self.fading_coefficient, R0=self.R0, R1=self.R1, C1=self.C1, dt=self.dt, Vmin=2.5, Vmax=4.0)
-        self.sc         = Supercapacitor(C=self.SC_C, R_esr=self.R_esr, V_init=self.SC_voltage , dt=self.dt)
-
-        self.state = np.array([self.input_current/np.max(self.i_dc_estimate), self.future_current/np.max(self.i_dc_estimate), self.battery_current/np.max(self.i_dc_estimate),
-                            self.SC_current/np.max(self.i_dc_estimate), 1, self.battery_SOC, np.clip(self.SC_voltage/16,0.0,1.0)], dtype=np.float32)
-        
-        self.state = np.clip(self.state, -1e6, 1e6)
-        return self.state, {}
-
-    def step(self, action):
-        self.battery_current    = np.clip(action[0], self.action_space.low[0], self.action_space.high[0])
-        self.SC_current         = np.clip(action[1], self.action_space.low[1], self.action_space.high[1])
-        battery_current_cell    = self.battery_current/self.n_batt_par
-        SC_current_cell         = self.SC_current/1 # We do not have parallel SCs in this case  
-        
-        V_bat, SOC, Q, V_RC = self.battery.step(battery_current_cell)
-        V_SC, V_sc          = self.sc.step(SC_current_cell)
-        self.battery_SOC    = SOC  
-        self.SC_voltage     = V_SC*self.C_n_seri 
-
-
-        # state section
-        epsilon = np.random.uniform(0, 1)
-        self.input_current      = self.i_dc_estimate[self.step_count+ self.start_idx] if epsilon > 0.1 else self.i_dc_estimate[self.step_count] + 10* np.random.uniform(0, 1)
-        self.future_current     = self.i_dc_future[self.step_count + self.start_idx]   if epsilon > 0.1 else self.i_dc_future[self.step_count] + 10* np.random.uniform(0, 1)
-
-        # Append to history
-        self.V_hist.append(V_bat*self.n_batt_seri)                 
-        self.SOC_hist.append(SOC*100)                                       
-        self.Q_hist.append(Q)                                               
-        self.V_SC_hist.append(V_SC*self.C_n_seri)                           
-        self.battery_I_hist.append(self.battery_current)                    
-        self.SC_I_hist.append(self.SC_current )                               
-        self.requested_I_hist.append(self.input_current)                    
-        self.provided_I_hist.append(self.battery_current + self.SC_current)
-
-        self.state = np.array([self.input_current/np.max(self.i_dc_estimate), self.future_current/np.max(self.i_dc_estimate), self.battery_current/np.max(self.i_dc_estimate),
-                            self.SC_current/np.max(self.i_dc_estimate), Q/self.battery_capacity, self.battery_SOC, np.clip(self.SC_voltage/110,0.0,1.0)], dtype=np.float32)
-        
-        # Stop conditions section
-        self.truncated = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110
-        self.terminated = self.step_count + self.start_idx >= self.end_counter - 1  #############################
-        
-        
-        # Define reward sections:
-        
-        self.buffer.append(self.battery_current)
-        r_std = -abs(np.std(self.buffer))
-
-        sum_current = self.battery_current + self.SC_current
-        self.output_current.append(sum_current)
-
-        r_current = -10*abs(sum_current-self.input_current)
-
-        r_capacity = -500 * abs(self.battery_capacity - Q)
-
-        self.current_buffer.append(self.battery_current)
-        r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 1 else 0
-
-        r_distance = 20000*(1 / (1+ abs(self.end_counter - self.step_count)))
-
-
-        reward_temp = r_current + r_capacity + r_current_a + r_std + r_distance
-
-        reward = float(np.clip(reward_temp, -1e3, 1e4)) if self.truncated == False else 100 * reward_temp
-        self.reward.append(reward)
-        assert not np.isnan(self.state).any(), "NaN in observation"
-        assert not np.isnan(reward), "NaN in reward"
-        assert np.isfinite(self.state).all(), "Inf in observation"
-        # info section                                  #########################################
-        if self.truncated != True and self.terminated != True:
-            self.info = {}
-        else:
-            self.info = {
-            'battery_voltage'       : self.V_hist,
-            'battery_SOC'           : self.SOC_hist,
-            'battery_capacity'      : self.Q_hist,
-            'SC_voltage'            : self.V_SC_hist,
-            'battery_I_history'     : self.battery_I_hist,
-            'SC_I_history'          : self.SC_I_hist,
-            'requested_I_history'   : self.requested_I_hist,
-            'provided_I_history'    : self.provided_I_hist,
-            'reward_history'        : self.reward,
-            }
-        self.step_count += 1
-        return self.state, reward, self.terminated,self.truncated, self.info
-
-    def render(self, mode='human'):
-        pass
-
-    def close(self):
-        pass
+with open('best_paramsCNN_LSTM.csv', 'r') as file:
+    reader = csv.reader(file)
+    next(reader)  # Skip header
+    for row in reader:
+        key, value = row
+        params_CNN_LSTM[key] = float(value) 
 
 
 
+estimator1 = NN3(num_hiddens1   =int(params_NN["num_hiddens1"]),
+                num_hiddens2    =int(params_NN["num_hiddens2"]),
+                num_hiddens3    =int(params_NN["num_hiddens3"]),
+                alpha           =params_NN["alpha"],
+                l1_coef         =params_NN["l1_coef"])
 
-# hybridESS = MyGymEnv(i_dc_estimate=i_dc_estimate, i_dc_future=i_dc_future)
+estimator2 = LSTM3(num_hiddens1 =int(params_LSTM["num_hiddens1"]),
+                num_hiddens2    =int(params_LSTM["num_hiddens2"]),
+                num_hiddens3    =int(params_LSTM["num_hiddens3"]),
+                alpha           =params_LSTM["alpha"],
+                l1_coef         =params_LSTM["l1_coef"])
 
+estimator3 = CNN3(num_kernels1  = int(params_CNN["num_kernels1"]),
+                num_kernels2    = int(params_CNN["num_kernels2"]),
+                num_kernels3    = int(params_CNN["num_kernels3"]),
+                kernel_size     = int(params_CNN["kernel_size"]),
+                alpha           = params_CNN["alpha"],
+                l1_coef         = params_CNN["l1_coef"])
 
-from ray import tune
-from ray.tune.logger import TBXLogger
-from ray.rllib.algorithms.sac import SACConfig
-from ray.rllib.env.env_context import EnvContext
-from ray.tune.registry import register_env
-import tensorflow as tf
-import torch
-print(torch.__version__)
+estimator4 = CNN2_LSTM(num_hiddens      = int(params_CNN_LSTM["num_hiddens"]),
+                        num_kernels1    = int(params_CNN_LSTM["num_kernels1"]),
+                        num_kernels2    = int(params_CNN_LSTM["num_kernels2"]),
+                        kernel_size     = int(params_CNN_LSTM["kernel_size"]),
+                        alpha           = params_CNN_LSTM["alpha"],
+                        l1_coef         = params_CNN_LSTM["l1_coef"])
 
-register_env("MyCustomEnv", lambda config: MyGymEnv(config))
-
-# --------- RLlib SAC-LSTM CONFIGURATION -----------
-
-config_dict1 = {
-    "log_level": "ERROR",
-    "framework": "torch",   # <--- change to torch
-    "num_workers": 4,
-    "num_gpus": 0,          # Set to 0 if you don't have a GPU
-    "num_envs_per_worker": 2,
-    "actor_lr": 1e-4,
-    "critic_lr": 1e-4,
-    "alpha_lr": 5e-5,
-    "normalize_actions": True,
-    "normalize_observations": False,
-    "clip_rewards": False,
-    "target_entropy": "auto",
-    "entropy_coeff": "auto",  # Automatically adjust entropy coefficient
-    "explore": True,  # Enable exploration
-    "rollout_fragment_length": 75,   # Must be >= max_seq_len
-    "train_batch_size": 1024,         # To hold multiple sequences
-    "logger_config": {
-        "type": TBXLogger,  # Ensures TensorBoard logging
-    },
-    "env": "MyCustomEnv",
-    "env_config": {
-        "i_dc_estimate": i_dc_estimate,   # these should be defined in your script!
-        "i_dc_future": i_dc_future,
-        "max_steps": len(i_dc_estimate),  # or any other per-episode limit you want
-    },
-    "rl_module": {
-        "model_config": {
-            "use_lstm": True,
-            "lstm_cell_size": 64,
-            "max_seq_len": 75,
-            "lstm_use_prev_action": True,
-            "lstm_use_prev_reward": True,
-            "fcnet_hiddens": [32, 16],
-            "fcnet_activation": "relu",
-            "burn_in": 5, # Number of initial steps to ignore before LSTM starts processing
-        }
-    }
-}
-
-config_dict2 = {
-    "log_level": "ERROR",
-    "framework": "torch",   # <--- change to torch
-    "num_workers": 4,
-    "num_gpus": 0,          # Set to 0 if you don't have a GPU
-    "num_envs_per_worker": 2,
-    "actor_lr": 1e-2,
-    "critic_lr": 1e-2,
-    "alpha_lr": 5e-3,
-    "normalize_actions": True,
-    "normalize_observations": False,
-    "clip_rewards": False,
-    "target_entropy": "auto",
-    "entropy_coeff": "auto",  # Automatically adjust entropy coefficient
-    "explore": True,  # Enable exploration
-    "rollout_fragment_length": 75,   # Must be >= max_seq_len
-    "train_batch_size": 1024,         # To hold multiple sequences
-    "logger_config": {
-        "type": TBXLogger,  # Ensures TensorBoard logging
-    },
-    "env": "MyCustomEnv",
-    "env_config": {
-        "i_dc_estimate": i_dc_estimate,   # these should be defined in your script!
-        "i_dc_future": i_dc_future,
-        "max_steps": len(i_dc_estimate),  # or any other per-episode limit you want
-    },
-    "rl_module": {
-        "model_config": {
-            "use_lstm": False,
-            "lstm_cell_size": 64,
-            "max_seq_len": 50,
-            "lstm_use_prev_action": True,
-            "lstm_use_prev_reward": True,
-            "fcnet_hiddens": [32, 16],
-            "fcnet_activation": "relu",
-            "burn_in": 5, # Number of initial steps to ignore before LSTM starts processing
-        }
-    }
-}
+from keras.callbacks import ModelCheckpoint
 
 
-config_dict3 = {
-    "log_level": "ERROR",
-    "framework": "torch",   # <--- change to torch
-    "num_workers": 4,
-    "num_gpus": 0,          # Set to 0 if you don't have a GPU
-    "num_envs_per_worker": 2,
-    "actor_lr": 1e-4,
-    "critic_lr": 1e-4,
-    "alpha_lr": 1e-4,
-    "normalize_actions": True,
-    "normalize_observations": True,
-    "clip_rewards": True,
-    "logger_config": {
-        "type": TBXLogger,  # Ensures TensorBoard logging
-    },
-    "env": "MyCustomEnv",
-    "env_config": {
-        "i_dc_estimate": i_dc_estimate,   # these should be defined in your script!
-        "i_dc_future": i_dc_future,
-        "max_steps": len(i_dc_estimate),  # or any other per-episode limit you want
-    },
-    "rl_module": {
-        "model_config": {
-            "use_lstm": False,
-            "lstm_cell_size": 64,
-            "max_seq_len": 20,
-            "lstm_use_prev_action": True,
-            "lstm_use_prev_reward": True,
-            "fcnet_hiddens": [128, 64],
-            "fcnet_activation": "relu",
-        }
-    }
-}
-
-config_dict4 = {
-    "log_level": "ERROR",
-    "framework": "torch",   # <--- change to torch
-    "num_workers": 4,
-    "num_gpus":0,          # Set to 0 if you don't have a GPU
-    "num_envs_per_worker": 2,
-    "actor_lr": 1e-4,
-    "critic_lr": 1e-4,
-    "alpha_lr": 1e-4,
-    "normalize_actions": True,
-    "normalize_observations": True,
-    "clip_rewards": True,
-    "logger_config": {
-        "type": TBXLogger,  # Ensures TensorBoard logging
-    },
-    "env": "MyCustomEnv",
-    "env_config": {
-        "i_dc_estimate": i_dc_estimate,   # these should be defined in your script!
-        "i_dc_future": i_dc_future,
-        "max_steps": len(i_dc_estimate),  # or any other per-episode limit you want
-    },
-    "rl_module": {
-        "model_config": {
-            "use_lstm": False,
-            "lstm_cell_size": 64,
-            "max_seq_len": 20,
-            "lstm_use_prev_action": True,
-            "lstm_use_prev_reward": True,
-            "fcnet_hiddens": [128, 64],
-            "fcnet_activation": "relu",
-        }
-    }
-}
-
-
-config_dict5 = {
-    "log_level": "ERROR",
-    "framework": "torch",   # <--- change to torch
-    "num_workers": 4,
-    "num_gpus": 0,          # Set to 0 if you don't have a GPU
-    "num_envs_per_worker": 2,
-    "actor_lr": 1e-3,
-    "critic_lr": 1e-3,
-    "alpha_lr": 1e-3,
-    "lr": 5e-5,
-    "entropy_coeff": 0.001,
-    "vf_loss_coeff": 0.2,
-    "clip_param": 0.2,
-    "grad_clip": 0.5,
-    "lambda": 0.9,
-    "explore": True,  # Enable exploration
-    "train_batch_size": 4000,
-    "sgd_minibatch_size": 256,
-    "num_sgd_iter": 10,
-    "normalize_actions": True,
-    "normalize_observations": False,
-    "clip_rewards": False,
-    "logger_config": {
-        "type": TBXLogger,  # Ensures TensorBoard logging
-    },
-    "clip_param": 1.0,  # PPO-specific
-    "env": "MyCustomEnv",
-    "env_config": {
-        "i_dc_estimate": i_dc_estimate,   # these should be defined in your script!
-        "i_dc_future": i_dc_future,
-        "max_steps": len(i_dc_estimate),  # or any other per-episode limit you want
-    },
-    "rl_module": {
-        "model_config": {
-            "use_lstm": True,
-            "lstm_cell_size": 64,
-            "max_seq_len": 20,
-            "lstm_use_prev_action": True,
-            "lstm_use_prev_reward": True,
-            "fcnet_hiddens": [128, 64],
-            "fcnet_activation": "relu",
-        }
-    }
-}
-
-config_dict6 = {
-    "log_level": "ERROR",
-    "framework": "torch",   # <--- change to torch
-    "num_workers": 4,
-    "num_gpus":0,          # Set to 0 if you don't have a GPU
-    "num_envs_per_worker": 2,
-    "actor_lr": 1e-4,
-    "critic_lr": 1e-4,
-    "alpha_lr": 1e-4,
-    "lr": 5e-5,
-    "entropy_coeff": 0.001,
-    "vf_loss_coeff": 0.2,
-    "clip_param": 0.2,
-    "grad_clip": 0.5,
-    "explore": True,  # Enable exploration
-    "lambda": 0.9,
-    "train_batch_size": 4000,
-    "sgd_minibatch_size": 256,
-    "num_sgd_iter": 10,
-    "normalize_actions": True,
-    "normalize_observations": False,
-    "clip_rewards": False,
-    "logger_config": {
-        "type": TBXLogger,  # Ensures TensorBoard logging
-    },
-    "clip_param": 1.0,  # PPO-specific
-    "env": "MyCustomEnv",
-    "env_config": {
-        "i_dc_estimate": i_dc_estimate,   # these should be defined in your script!
-        "i_dc_future": i_dc_future,
-        "max_steps": len(i_dc_estimate),  # or any other per-episode limit you want
-    },
-    "rl_module": {
-        "model_config": {
-            "use_lstm": False,
-            "lstm_cell_size": 64,
-            "max_seq_len": 20,
-            "lstm_use_prev_action": True,
-            "lstm_use_prev_reward": True,
-            "fcnet_hiddens": [128, 64],
-            "fcnet_activation": "relu",
-        }
-    }
-}
-
-import warnings
-from ray import tune
-warnings.filterwarnings("ignore")
-
-# --------- TRAINING -----------
-stop_criteria = {
-    "training_iteration": 500, # Set a high number for iterations
-    #"episode_reward_mean": -10,    # Stop when mean reward reaches 200
-}
-
-stop_criteria_PPO = {
-    "training_iteration": 500, # Set a high number for iterations
-    "episode_reward_mean": -10,    # Stop when mean reward reaches 200
-}
-
-
-from ray.tune.logger import TBXLogger
-from ray.tune.logger import pretty_print
-
-
-results1 = tune.run(
-    "SAC",
-    config=config_dict1,
-    stop=stop_criteria,
-    verbose=1,
-    name="SAC-LSTM-Experiment",
-    local_dir="~/SAC_LSTM_results",
-    checkpoint_at_end=True,                      
-    checkpoint_freq=5,                           
-    keep_checkpoints_num=3,                      
-    checkpoint_score_attr="episode_reward_mean", # Maximize by default
-    log_to_file=True,  # it force to log all the results to a file
+checkpoint_NN = ModelCheckpoint(
+    filepath='best_model_NN.h5',        
+    monitor='val_loss',              
+    save_best_only=True,             
+    mode='min',                      
+    save_weights_only=False          
 )
 
-
-
-
-results2 = tune.run(
-    "SAC",
-    config=config_dict2,
-    stop=stop_criteria,
-    verbose=1,
-    name="SAC-Experiment",
-    local_dir="~/SAC_results",
-    checkpoint_at_end=True,                      # Save a checkpoint at the end
-    checkpoint_freq=5,                           # Checkpoint every 5 iterations
-    keep_checkpoints_num=3,                      # Keep only top 3
-    checkpoint_score_attr="episode_reward_mean", # Use max episode return for ranking
-    log_to_file=True,  # it force to log all the results to a file  
-)
-# from rllib_contrib.td3 import TD3
-# from your_local_td3_module import TD3Trainer
-# from ray.rllib.algorithms.registry import register_algorithm
-
-# register_algorithm("TD3", TD3Trainer)
-
-
-# results3 = tune.run(
-#     "TD3",
-#     config=config_dict3,
-#     stop=stop_criteria,
-#     verbose=1,
-#     name="TD3-Experiment",
-#     local_dir="~/TD3_results",
-#     checkpoint_at_end=True,                      # Save a checkpoint at the end
-#     checkpoint_freq=5,                           # Checkpoint every 5 iterations
-#     keep_checkpoints_num=3,                      # Keep only top 3
-#     checkpoint_score_attr="episode_reward_mean", # Use max episode return for ranking
-#     log_to_file=True, 
-# )
-
-# results4 = tune.run(
-#     "TD3",
-#     config=config_dict4,
-#     stop=stop_criteria,
-#     verbose=1,
-#     name="TD3-Experiment",
-#     local_dir="~/TD3_results",
-#     checkpoint_at_end=True,                      # Save a checkpoint at the end
-#     checkpoint_freq=5,                           # Checkpoint every 5 iterations
-#     keep_checkpoints_num=3,                      # Keep only top 3
-#     checkpoint_score_attr="episode_reward_mean", # Use max episode return for ranking
-# )
-
-results5 = tune.run(
-    "PPO",
-    config=config_dict5,
-    stop=stop_criteria_PPO,
-    verbose=1,
-    name="PPO-LSTM-Experiment",
-    local_dir="~/PPO_LSTM_results",
-    checkpoint_at_end=True,                      # Save a checkpoint at the end
-    checkpoint_freq=5,                           # Checkpoint every 5 iterations
-    keep_checkpoints_num=3,                      # Keep only top 3
-    checkpoint_score_attr="episode_reward_mean", # Use max episode return for ranking
-    log_to_file=True,
+checkpoint_LSTM = ModelCheckpoint(
+    filepath='best_model_LSTM.h5',        
+    monitor='val_loss',              
+    save_best_only=True,             
+    mode='min',                      
+    save_weights_only=False          
 )
 
-results6 = tune.run(
-    "PPO",
-    config=config_dict6,
-    stop=stop_criteria_PPO,
-    verbose=1,
-    name="PPO-Experiment",
-    local_dir="~/PPO_results",
-    checkpoint_at_end=True,                      # Save a checkpoint at the end
-    checkpoint_freq=5,                           # Checkpoint every 5 iterations
-    keep_checkpoints_num=3,                      # Keep only top 3
-    checkpoint_score_attr="episode_reward_mean", # Use max episode return for ranking
-    log_to_file=True,
+checkpoint_CNN = ModelCheckpoint(
+    filepath='best_model_CNN.h5',        
+    monitor='val_loss',              
+    save_best_only=True,             
+    mode='min',                      
+    save_weights_only=False          
 )
 
-
-###########################################################################################################
-###########################################################################################################
-
-best_trial_SAC_LSTM = results1.get_best_trial(metric="episode_reward_mean", mode="max")
-best_trial_SAC      = results2.get_best_trial(metric="episode_reward_mean", mode="max")
-best_trial_PPO_LSTM = results5.get_best_trial(metric="episode_reward_mean", mode="max")
-best_trial_PPO      = results6.get_best_trial(metric="episode_reward_mean", mode="max")
-
-# To get the checkpoint directory:
-best_checkpoint_SAC_LSTM = results1.get_best_checkpoint(
-    best_trial_SAC_LSTM ,
-    metric="episode_reward_mean",
-    mode="max"
+checkpoint_CNN_LSTM = ModelCheckpoint(
+    filepath='best_model_CNN_LSTM.h5',        
+    monitor='val_loss',              
+    save_best_only=True,             
+    mode='min',                      
+    save_weights_only=False          
 )
 
-best_checkpoint_SAC = results2.get_best_checkpoint(
-    best_trial_SAC ,
-    metric="episode_reward_mean",
-    mode="max"
-)
-
-best_checkpoint_PPO_LSTM = results5.get_best_checkpoint(
-    best_trial_PPO_LSTM ,
-    metric="episode_reward_mean",
-    mode="max"
-)
-
-best_checkpoint_PPO = results6.get_best_checkpoint(
-    best_trial_PPO ,
-    metric="episode_reward_mean",
-    mode="max"
-)
-
-print("Best trial_SAC_LSTM:", best_trial_SAC_LSTM )     # name of best trial
-print("Best checkpoint:", best_checkpoint_SAC_LSTM )    # location of best checkpoint
-
-mean_reward_SAC_LSTM    = best_trial_SAC_LSTM.metric_analysis["episode_reward_mean"]["avg"]
-mean_reward_SAC         = best_trial_SAC.metric_analysis["episode_reward_mean"]["avg"]
-mean_reward_PPO_LSTM    = best_trial_PPO_LSTM.metric_analysis["episode_reward_mean"]["avg"]
-mean_reward_PPO         = best_trial_PPO.metric_analysis["episode_reward_mean"]["avg"]
-
-print("Best trial's mean SAC_LSTM episode reward:"  , mean_reward_SAC_LSTM)
-print("Best trial's mean SAC episode reward:"       , mean_reward_SAC)
-print("Best trial's mean PPO_LSTM episode reward:"  , mean_reward_PPO_LSTM)
-print("Best trial's mean PPO episode reward:"       , mean_reward_PPO)
-
-
-# look inside of each trial dataframe to see the results:
-df = results1.trial_dataframes[best_trial_SAC_LSTM.trial_id]
-print(df["episode_reward_mean"].describe())
-mean_reward = df["episode_reward_mean"].mean()
-
-
-
-########################### EValuation of trained agnet: ######################################################
-
-
-class MyEvalEnv(Env):
-    def __init__(self, config=None):
-        super().__init__()
-        config = config or {}
-        self.i_dc_estimate      = config.get("i_dc_estimate", np.zeros(1000))
-        self.i_dc_future        = config.get("i_dc_future", np.zeros(1000))
-        self.max_steps          = config.get("max_steps", 8000)
-        
-        self.observation_space = spaces.Box(low=np.array([-1.5, -1.5, -1.5, -1.5, 0, 0, 0]), 
-                                            high=np.array([1.5, 1.5, 1.5, 1.5, 1, 1, 1]), 
-                                            shape=(7,), dtype=np.float32
-)
-        
-        self.action_space       = spaces.Box(low=-np.array([min_current,min_current]), 
-                                            high=np.array([max_current,max_current]), shape=(2,), dtype=np.float32)
-        
-        self.input_current      = self.i_dc_estimate[0] + 10* np.random.uniform(-1, 1)
-        self.output_current     = []
-        self.future_current     = self.i_dc_future[0]   + 10* np.random.uniform(-1, 1)
-        
-
-        # Deining Buffers
-        self.buffer = deque(maxlen=60)
-        self.current_buffer = deque(maxlen=10)
-
-        # History
-        self.dt                 = 0.1
-        self.V_hist             = []
-        self.SOC_hist           = []
-        self.Q_hist             = []
-        self.V_SC_hist          = []
-        self.battery_I_hist     = []
-        self.SC_I_hist          = []
-        self.requested_I_hist   = []
-        self.provided_I_hist    = []
-        self.R_std              = []
-        self.R_current          = []
-        self.R_capacity         = []
-        self.R_current_a        = []
-        self.R_distance         = []
-        self.reward             = []
-        # Battery
-        self.battery_current    = 0
-        self.battery_capacity   = 3.2 + 0.1 * np.random.uniform(-1, 1)
-        self.battery_SOC        = 0.60  + 0.20  * np.random.uniform(-1, 1)
-        self.battery_voltage    = 2.5 + self.battery_SOC  * (3.1 - 2.5)
-        self.n_batt_par         = 22
-        self.n_batt_seri        = 60
-        self.fading_coefficient = 2e-8  # alpha 2 coeff for derivative
-        self.R0                 = 0.03
-        self.R1                 = 0.04
-        self.C1                 = 750
-        # SC
-        self.C_n_seri           = 7
-        self.SC_current         = 0
-        self.SC_voltage         = (np.random.uniform(9,16))  ############################################
-        self.end_counter        = self.max_steps
-        self.SC_C               = 58
-        self.R_esr              = 22e-3
-        
-
-
-        self.terminated         = False
-        self.truncated          = False
-        self.info               = {}
-        self.step_count         = 0
-        # Defining Models
-        self.battery    = ECM_RC_Battery(Q_init=self.battery_capacity, alpha=self.fading_coefficient, R0=self.R0, R1=self.R1, C1=self.C1, dt=self.dt, Vmin=2.5, Vmax=4.0)
-        self.sc         = Supercapacitor(C=self.SC_C, R_esr=self.R_esr, V_init=self.SC_voltage , dt=self.dt)
-        
-
-    def reset(self, *, seed=None, options=None):
-        super().reset(seed=seed)
-        self.input_current      = self.i_dc_estimate[0] + 10* np.random.uniform(-1, 1)
-        self.future_current     = self.i_dc_future[0]   + 10* np.random.uniform(-1, 1)
-        self.output_current     = []
-
-        self.battery_current    = 0
-        self.battery_capacity   = 3.2 + 0.1 * np.random.uniform(-1, 1)
-        self.battery_SOC        = 0.60  + 0.20  * np.random.uniform(-1, 1)
-        self.battery_voltage    = 2.5 + self.battery_SOC  * (3.1 - 2.5)
-
-        self.buffer.clear()
-        self.current_buffer.clear()
-
-        self.SC_C               = 58
-        self.R_esr              = 22e-3
-        self.C_n_seri           = 7
-        self.SC_current         = 0
-        self.SC_voltage         = (np.random.uniform(9,16))  ############################################
-        self.terminated         = False
-        self.truncated          = False
-        self.info               = {}
-        self.step_count         = 0
-
-        self.battery    = ECM_RC_Battery(Q_init=self.battery_capacity, alpha=self.fading_coefficient, R0=self.R0, R1=self.R1, C1=self.C1, dt=self.dt, Vmin=2.5, Vmax=4.0)
-        self.sc         = Supercapacitor(C=self.SC_C, R_esr=self.R_esr, V_init=self.SC_voltage , dt=self.dt)
-
-        self.state = np.array([self.input_current/np.max(self.i_dc_estimate), self.future_current/np.max(self.i_dc_estimate), self.battery_current/np.max(self.i_dc_estimate),
-                            self.SC_current/np.max(self.i_dc_estimate), 1, self.battery_SOC, np.clip(self.SC_voltage/16,0.0,1.0)], dtype=np.float32) ############################################
-        return self.state, {}
-
-    def step(self, action):
-        self.battery_current    = np.clip(action[0],np.min(self.i_dc_estimate),np.max(self.i_dc_estimate))
-        self.SC_current         = np.clip(action[1],np.min(self.i_dc_estimate),np.max(self.i_dc_estimate))
-        battery_current_cell    = action[0]/self.n_batt_par
-        SC_current_cell         = action[1]/1 # We don not have parallel SCs in this case  
-        
-        V_bat, SOC, Q, V_RC = self.battery.step(battery_current_cell)
-        V_SC, V_sc = self.sc.step(SC_current_cell)
-        self.battery_SOC = SOC  
-        self.SC_voltage = V_SC*self.C_n_seri 
-
-        # state section
-        self.input_current      = self.i_dc_estimate[self.step_count]   # Not randomely generated here
-        self.future_current     = self.i_dc_future[self.step_count]     # Not randomely generated here
-
-        # Append to history
-        self.V_hist.append(V_bat*self.n_batt_seri)                          
-        self.SOC_hist.append(SOC*100)                                       
-        self.Q_hist.append(Q)                                                
-        self.V_SC_hist.append(V_SC*self.C_n_seri)                           
-        self.battery_I_hist.append(self.battery_current)                    
-        self.SC_I_hist.append(self.SC_current )                                
-        self.requested_I_hist.append(self.input_current)                    
-        self.provided_I_hist.append(self.battery_current + self.SC_current) 
-
-        
-
-        self.state = np.array([self.input_current/np.max(self.i_dc_estimate), self.future_current/np.max(self.i_dc_estimate), self.battery_current/np.max(self.i_dc_estimate),
-                            self.SC_current/np.max(self.i_dc_estimate), Q/self.battery_capacity, self.battery_SOC, np.clip(self.SC_voltage/16,0.0,1.0)], dtype=np.float32)
-        
-        self.truncated  = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110
-        self.terminated = self.step_count >= self.end_counter - 1
-        
-        
-        # Define reward sections:
-        
-        self.buffer.append(self.battery_current)
-        r_std = -abs(np.std(self.buffer))
-        self.R_std.append(r_std)
-
-        sum_current = self.battery_current + self.SC_current
-        self.output_current.append(sum_current)
-
-        r_current = -10*abs(sum_current-self.input_current)
-        self.R_current.append(r_current)
-
-        r_capacity = -500 * abs(self.battery_capacity - Q)
-        self.R_capacity.append(r_capacity)
-
-        self.current_buffer.append(self.battery_current)
-        r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 1 else 0
-        self.R_current_a.append(r_current_a)
-
-        r_distance = 20000*(1 / (1+ abs(self.end_counter - self.step_count))) ###### chaning for balancing
-        self.R_distance.append(r_distance)
-
-        reward_temp = r_current + r_capacity + r_current_a + r_std + r_distance
-
-        reward = float(np.clip(reward_temp, -1e3, 1e4)) #if self.truncated == False else 100 * reward_temp
-        self.reward.append(reward)
-
-        # info section                                  #########################################
-        # if self.truncated == False and self.terminated == False:
-        #     self.info = {}
-        # else:
-        self.info = {
-        'battery_voltage'       : self.V_hist,
-        'battery_SOC'           : self.SOC_hist,
-        'battery_capacity'      : self.Q_hist,
-        'SC_voltage'            : self.V_SC_hist,
-        'battery_I_history'     : self.battery_I_hist,
-        'SC_I_history'          : self.SC_I_hist,
-        'requested_I_history'   : self.requested_I_hist,
-        'provided_I_history'    : self.provided_I_hist,
-        "STD"                   : self.R_std,
-        "r_current"             : self.R_current,
-        "r_capacity"            : self.R_capacity,
-        "r_current_a"           : self.R_current_a,
-        "r_distance"            : self.R_distance,
-        "reward"                : self.reward,
-        }
-        self.step_count += 1
-        return self.state, reward, self.terminated,self.truncated, self.info
-
-    def render(self, mode='human'):
-        pass
-
-    def close(self):
-        pass
-
-register_env("MyEvalEnv", lambda config: MyEvalEnv(config))
-
-# from gymnasium.envs.registration import register
-# register(
-#     id="MyCustomEnv-v0",
-#     entry_point=MyEvalEnv,
-# )
-
-# env = gym.make("MyCustomEnv-v0", config=config_dict1["env_config"])
-
-
-n_episodes = 10
-returns = []
-# Define a low-pass Butterworth filter function
-
-def butter_lowpas_filter(i_input, cutoff,fs,order=1):
-    nyq = 0.5 * fs
-    normal_cutoff = cutoff / nyq
-    b, a = butter(order, normal_cutoff, btype='low', analog=False)
-    y = filtfilt(b, a, i_input)
-    return y
-
-filtered_i = butter_lowpas_filter(i_dc_estimate, 0.00637, 1, order=1)
-
-action = np.zeros((len(i_dc_estimate), 2), dtype=np.float32)
-action[:, 0] = filtered_i
-action[:, 1] = i_dc_estimate - filtered_i
-
-plt.figure(figsize=(10, 6))
-plt.plot(i_dc_estimate, label='Original Signal', color='black')
-plt.plot(action[:, 0], label='Battery Signal', color='blue')
-plt.plot(action[:, 1], label='SC Signal', color='red')
-plt.title('Low-pass Filtered Signal')
-plt.xlabel('Sample Number')
-plt.ylabel('Amplitude')
-plt.legend()
-plt.grid()
-plt.show()
-
-# testing ENV
-eval_config = best_trial_SAC_LSTM.config.copy()
-eval_config["env"] = "MyEvalEnv"
-eval_config["env_config"] = {
-    "i_dc_estimate": i_dc_estimate,
-    "i_dc_future": i_dc_future,
-    "max_steps": 8000
-}
-env = MyEvalEnv(eval_config["env_config"])
-obs, info = env.reset()
-done = False
-total_reward = 0.0
-counter = 0
-info_hist = {}
-info_hist[("STD", "r_current", "r_capacity", "r_current_a", "r_distance", "Reward")] = {}
-
-info_hist_rand = {}
-info_hist_rand[("STD", "r_current", "r_capacity", "r_current_a", "r_distance", "Reward")] = {}
-action_hist=[]
-
-#low pass filter
-while not done:
-    obs, reward, done, truncated, info = env.step(action[counter,:])
-    total_reward += reward
-    counter +=1
-    returns.append(total_reward)
-    if done or truncated or counter ==8000:
-        info_hist = info
-        print("SOC :", info_hist['battery_SOC'][-1])
-        break
-env.close()
-
-# random filter
-obs, info = env.reset()
-done = False
-total_reward = 0.0
-counter = 0
-info_hist_rand = {}
-info_hist_rand[("STD", "r_current", "r_capacity", "r_current_a", "r_distance", "Reward")] = {}
-action_hist = np.empty((0, 2))  # For actions with 2 values (battery, sc)
-
-
-while not done:
-    # action1 = np.array([
-    #     np.random.uniform(np.min(i_dc_estimate), np.max(i_dc_estimate))/20,
-    #     np.random.uniform(np.min(i_dc_estimate), np.max(i_dc_estimate))/20
-    # ])
-    action1 = np.array([
-        -10,
-        -10
-    ])
-    action_hist = np.append(action_hist, [action1], axis=0)
-    obs, reward, done, truncated, info = env.step(action1)
-    total_reward += reward
-    counter += 1
-    returns.append(total_reward)
-    print(f"Step {counter}, \t Reward: {reward:.3f}")
-    if done or truncated:
-        info_hist_rand = info
-        print("SOC :", info_hist_rand['battery_SOC'][-1], "\t Done:", done, "\t Truncated:", truncated, "SC Voltage:", info_hist_rand['SC_voltage'][-1])
-        break
-
-env.close()
-
-# action_hist = np.array(action_hist)
-# print(info_hist.keys())
-# print(f"Episode Return  : {total_reward}")
-# print(f"STD             : {info_hist['STD']}")
-# print(f"r_current       : {info_hist['r_current']}")
-# print(f"r_capacity      : {info_hist['r_capacity']}")
-# print(f"r_current_a     : {info_hist['r_current_a']}")
-# print(f"r_distance      : {info_hist['r_distance']}")
-# print(f"Reward          : {info_hist['reward']}")
-
-plt.figure(figsize=(10, 6))
-plt.plot(info_hist['battery_I_history'][:-50]      , label='battery_I_history'     , color='black')
-plt.plot(info_hist['SC_I_history'][:-50]           , label='SC_I_history'          , color='red')
-# plt.plot(info_hist_rand['battery_I_history'][:-50]    , label='battery_I_history_rand'   , color='blue')
-# plt.plot(info_hist_rand['SC_I_history'][:-50]     , label='SC_I_history_rand'    , color='green')
-# plt.plot(info_hist['STD']                   , label='STD'                   , color='brown')
-# plt.plot(info_hist['r_current']             , label='r_current'             , color='pink')
-# plt.plot(info_hist['r_capacity']            , label='r_capacity'            , color='orange')
-# plt.plot(info_hist['r_current_a']           , label='r_current_a'           , color='cyan')
-# plt.plot(info_hist['r_distance']            , label='r_distance'            , color='gold')
-# plt.plot(info_hist['reward'][:-50]                  , label='reward'                , color='magenta')
-# plt.plot(info_hist_rand['reward'][:-50]             , label='reward1'                , color='blue')
-plt.title('Low-pass Filtered Signal')
-plt.xlabel('Sample Number')
-plt.ylabel('Amplitude')
-plt.legend()
-plt.grid()
-plt.show()    
-
-plt.figure(figsize=(10, 6))
-plt.plot(action_hist[:,0]     , label='battery'     , color='green')
-plt.plot(action_hist[:,1]     , label='sc'          , color='gold')
-plt.title('action Signal')
-plt.xlabel('Sample Number')
-plt.ylabel('Amplitude')
-plt.legend()
-plt.grid()
-plt.show()    
-
-####################################Testing Battery Model ##########################################################
-battery    = ECM_RC_Battery()
-capacitor = Supercapacitor(C=500, R_esr=0.01, V_init=16, dt=1.0)
-SOC1=[]
-SOC2=[]
-for i in range(1000):
-    # V_bat, SOC, Q, V_RC = battery.step(action[i,0]/60)
-    V_out, V_SC = capacitor.step(action[i,1])
-    print(f"\t Step {i+1}: \t SOC: {V_out}, \t Capacity: {V_SC}")
-    SOC1.append(V_SC)
-    if V_SC <= 2:
-        print("Battery SOC is too low, stopping simulation.")
-        break
-
-for i in range(1000):
-    # V_bat, SOC, Q, V_RC = battery.step(action[i,0]/60)
-    V_out, V_SC = capacitor.step(np.random.uniform(np.min(action[:,1]),np.max(action[:,1])))
-    print(f"\t Step {i+1}: \t SOC: {V_out}, \t Capacity: {V_SC}")
-    SOC2.append(V_SC)
-    if V_SC <= 2:
-        print("Battery SOC is too low, stopping simulation.")
-        break
-
-
-for i in range(1000):
-    V_bat, SOC, Q, V_RC = battery.step(np.random.uniform(np.min(i_dc_estimate),np.max(i_dc_estimate))/60)
-    # print(f"\t Step {i+1}: \t SOC: {SOC}, \t Capacity: {Q}")
-    SOC2.append(SOC)
-    if SOC <= 0.05:
-        print("Battery SOC is too low, stopping simulation.")
-        break
-
-plt.figure(figsize=(10, 6))
-plt.plot(SOC1           , label='low_pass'            , color='gold')
-plt.plot(SOC2           , label='random'              , color='black')
-plt.title('Low-pass Filtered Signal')
-plt.xlabel('Sample Number')
-plt.ylabel('Amplitude')
-plt.legend()
-plt.grid()
-plt.show()  
-
-################################ testing Algo ( testing and training ENV must be the same) ##################
-from ray.rllib.algorithms.sac import SAC
-from ray.rllib.algorithms.ppo import PPO
-
-
-
-
-checkpoint_path_1 = best_checkpoint_SAC_LSTM.path
-algo_SAC_LSTM = SAC.from_checkpoint(checkpoint_path_1)
-
-checkpoint_path_2 = best_checkpoint_SAC.path
-algo_SAC = SAC.from_checkpoint(checkpoint_path_2)
-
-checkpoint_path_3 = best_checkpoint_PPO_LSTM.path
-algo_PPO_LSTM = PPO.from_checkpoint(checkpoint_path_3)
-
-checkpoint_path_4 = best_checkpoint_PPO.path
-algo_PPO = PPO.from_checkpoint(checkpoint_path_4)
-
-# Prepare config for restoring
-eval_config1 = best_trial_SAC_LSTM.config.copy()
-eval_config1["env"] = "MyEvalEnv"
-eval_config1["env_config"] = {
-    "i_dc_estimate": i_dc_estimate,
-    "i_dc_future": i_dc_future,
-    "max_steps": len(i_dc_estimate)
-}
-
-eval_config2 = best_trial_SAC.config.copy()
-eval_config2["env"] = "MyEvalEnv"
-eval_config2["env_config"] = {
-    "i_dc_estimate": i_dc_estimate,
-    "i_dc_future": i_dc_future,
-    "max_steps": len(i_dc_estimate)
-}
-
-eval_config3 = best_trial_PPO_LSTM.config.copy()
-eval_config3["env"] = "MyEvalEnv"
-eval_config3["env_config"] = {
-    "i_dc_estimate": i_dc_estimate,
-    "i_dc_future": i_dc_future,
-    "max_steps": len(i_dc_estimate)
-}
-
-eval_config4 = best_trial_PPO.config.copy()
-eval_config4["env"] = "MyEvalEnv"
-eval_config4["env_config"] = {
-    "i_dc_estimate": i_dc_estimate,
-    "i_dc_future": i_dc_future,
-    "max_steps": len(i_dc_estimate)
-}
-
-
-# Instantiate the environment manually (for step-by-step evaluation)
-env1 = MyEvalEnv(eval_config1["env_config"])
-env2 = MyEvalEnv(eval_config2["env_config"])
-env3 = MyEvalEnv(eval_config3["env_config"])
-env4 = MyEvalEnv(eval_config4["env_config"])
-
-obs, info = env1.reset()
-done = False
-truncated = False
-total_reward = 0.0
-info_hist_SAC_LSTM = {}
-info_hist_SAC_LSTM[("battery_I_history", "SC_I_history", "r_capacity", "r_current_a", "r_distance", "Reward")] = {}
-
-info_hist_SAC = {}
-info_hist_SAC[("STD", "r_current", "r_capacity", "r_current_a", "r_distance", "Reward")] = {}
-
-info_hist_PPO_LSTM = {}
-info_hist_PPO_LSTM[("STD", "r_current", "r_capacity", "r_current_a", "r_distance", "Reward")] = {}
-
-info_hist_PPO = {}
-info_hist_PPO[("battery_I_history", "SC_I_history", "r_capacity", "r_current_a", "r_distance", "Reward")] = {}
-
-while not (done or truncated):
-    action = algo_SAC_LSTM.compute_single_action(obs, explore=False)  # Do NOT overwrite algo.config
-    obs, reward, done, truncated, info = env.step(action)
-    total_reward += reward
-    if done or truncated or counter ==len(i_dc_estimate):
-        info_hist_SAC_LSTM = info
-        break
-env1.close()
-
-
-obs, info = env2.reset()
-done = False
-truncated = False
-total_reward = 0.0
-while not (done or truncated):
-    action = algo_SAC.compute_single_action(obs, explore=False)  # Do NOT overwrite algo.config
-    obs, reward, done, truncated, info = env.step(action)
-    total_reward += reward
-    if done or truncated or counter ==len(i_dc_estimate):
-        info_hist_SAC = info
-        break
-env2.close()
-
-obs, info = env3.reset()
-done = False
-truncated = False
-total_reward = 0.0
-while not (done or truncated):
-    action = algo_PPO_LSTM.compute_single_action(obs, explore=False)  # Do NOT overwrite algo.config
-    obs, reward, done, truncated, info = env.step(action)
-    total_reward += reward
-    if done or truncated or counter ==len(i_dc_estimate):
-        info_hist_PPO_LSTM = info
-        break
-env3.close()
-
-
-obs, info = env4.reset()
-done = False
-truncated = False
-total_reward = 0.0
-while not (done or truncated):
-    action = algo_PPO.compute_single_action(obs, explore=False)  # Do NOT overwrite algo.config
-    obs, reward, done, truncated, info = env.step(action)
-    total_reward += reward
-    if done or truncated or counter ==len(i_dc_estimate):
-        info_hist_PPO = info
-        break
-env4.close()
-
-
-
-plt.figure(figsize=(10, 6))
-plt.plot(info_hist_SAC_LSTM['reward'][:-8000]                   , label='SAC_LSTM'           , color='red')
-plt.plot(info_hist_SAC['battery_I_history'][:-8000]                       , label='SAC'                , color='black')
-# plt.plot(info_hist_PPO_LSTM['reward']                   , label='PPO_LSTM'           , color='blue')
-# plt.plot(info_hist_PPO['battery_I_history']                        , label='PPO'                , color='magenta')
-plt.title('Low-pass Filtered Signal')
-plt.xlabel('Sample Number')
-plt.ylabel('Amplitude')
-plt.legend()
-plt.grid()
-plt.show() 
-
-
+# # Training
+history1 = estimator1.fit(X_CNN.reshape(17099,30*11), Y_CNN, epochs=1000, batch_size=32, validation_split=0.2,callbacks=[checkpoint_NN])
+history2 = estimator2.fit(X_CNN, Y_CNN, epochs=1000, batch_size=32, validation_split=0.2,callbacks=[checkpoint_LSTM])
+history3 = estimator3.fit(X_CNN, Y_CNN, epochs=1000, batch_size=32, validation_split=0.2,callbacks=[checkpoint_CNN])
+history4 = estimator4.fit(X_CNN, Y_CNN, epochs=1000, batch_size=32, validation_split=0.2,callbacks=[checkpoint_CNN_LSTM])
