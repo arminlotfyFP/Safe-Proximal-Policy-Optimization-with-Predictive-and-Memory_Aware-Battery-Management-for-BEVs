@@ -1,0 +1,6 @@
+Parameter,Value
+num_hiddens1,69
+num_hiddens2,122
+num_hiddens3,44
+alpha,1.010295127144828e-05
+l1_coef,9.35593670224662e-05
