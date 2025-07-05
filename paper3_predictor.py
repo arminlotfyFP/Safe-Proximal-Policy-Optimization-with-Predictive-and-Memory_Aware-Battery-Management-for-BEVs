@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 import matplotlib.pyplot as plt
-import mat73
+#import mat73
 import h5py
 import scipy.io as scipy
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
@@ -12,16 +12,8 @@ from sklearn.model_selection import train_test_split
 print(os.getcwd())
 os.chdir("/home/armin/Desktop/paper3_python/paper3_py")
 
-
-<<<<<<< HEAD
-<<<<<<< HEAD
-data = mat73.loadmat('data.mat')
-=======
+# Load the data
 # data = mat73.loadmat('data.mat')
->>>>>>> aabf279 (All files)
-=======
-# data = mat73.loadmat('data.mat')
->>>>>>> aabf279 (All files)
 data = scipy.loadmat('data.mat')
 
 data = data["data"]
