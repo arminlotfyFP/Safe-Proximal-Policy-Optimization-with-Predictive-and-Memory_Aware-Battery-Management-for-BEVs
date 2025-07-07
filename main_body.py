@@ -292,7 +292,7 @@ class MyGymEnv(Env):
         r_current = -10*abs(sum_current-self.input_current)
         #Capacity
         r_capacity = -500 * abs(self.battery_capacity - Q)
-        #Dev current
+        #Derivative current
         self.current_buffer.append(self.battery_current)
         r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 1 else 0
         # Distance
@@ -1218,7 +1218,7 @@ done = False
 truncated = False
 total_reward = 0.0
 info_hist_SAC_LSTM = {}
-info_hist_SAC_LSTM[("battery_I_history", "SC_I_history", "r_capacity", "r_current_a", "r_distance", "Reward")] = {}
+info_hist_SAC_LSTM[("STD", "r_current", "r_capacity", "r_current_a", "r_distance", "Reward")] = {}
 
 info_hist_SAC = {}
 info_hist_SAC[("STD", "r_current", "r_capacity", "r_current_a", "r_distance", "Reward")] = {}
