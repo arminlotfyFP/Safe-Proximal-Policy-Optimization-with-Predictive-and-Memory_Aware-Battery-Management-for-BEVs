@@ -61,8 +61,6 @@ for i in range(len(i_dc_future) - 30):
 # plt.show()
 
 
-max_current = 2.0
-min_current = -2.0
 
 # Define Battery & SC
 
@@ -93,6 +91,8 @@ class ECM_RC_Battery:
         self.dt = dt                  # Simulation timestep (seconds)
         self.Vmin = Vmin              # Minimum voltage
         self.Vmax = Vmax              # Maximum voltage
+        self.ai = 0.0
+        self.i0 = 0.0
 
         # State variables
         self.Q = Q_init               # Current capacity (Ah)
@@ -115,16 +115,20 @@ class ECM_RC_Battery:
         # Enforce SOC limits
         self.SOC = np.clip(self.SOC, 0.0, 1.0)
 
+        #ai
+        self.ai = abs(self.i0-I_bat) #
+
         # Terminal voltage
         V_oc = self.voc(self.SOC)
         V_bat = V_oc - I_bat * self.R0 - self.V_RC
 
         # Capacity fade update (increment by one cycle if fully charged/discharged)
         if self.SOC == 0 or self.SOC == 1.0:
-            self.cycle_count += 1
-            self.Q = self.Q_init * (1 - self.alpha * self.cycle_count)
+            # self.cycle_count += 1
+            # self.Q = self.Q_init * (1 - self.alpha * self.cycle_count)
+            pass
         else:
-            self.Q = self.Q - (I_bat * self.dt) / 3600 if I_bat< 3*self.Q else self.Q - 3*((I_bat * self.dt) / 3600) # Update capacity based on discharge
+            self.Q = self.Q-self.ai*0.000_05  - 0.1*(abs(I_bat) * self.dt) / 3600 if abs(I_bat)< 3*self.Q else self.Q-self.ai*0.000_05 - 3*0.1*((abs(I_bat) * self.dt) / 3600) 
         self.Q = max(self.Q, 0.0)
 
         return V_bat, self.SOC, self.Q, self.V_RC
@@ -279,21 +283,21 @@ class MyGymEnv(Env):
         
         # Define reward sections:
         
+        #STD
         self.buffer.append(self.battery_current)
         r_std = -abs(np.std(self.buffer))
-
+        #Current
         sum_current = self.battery_current + self.SC_current
         self.output_current.append(sum_current)
-
         r_current = -10*abs(sum_current-self.input_current)
-
+        #Capacity
         r_capacity = -500 * abs(self.battery_capacity - Q)
-
+        #Dev current
         self.current_buffer.append(self.battery_current)
         r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 1 else 0
-
+        # Distance
         r_distance = 20000*(1 / (1+ abs(self.end_counter - self.step_count)))
-
+        # SOC??????????
 
         reward_temp = r_current + r_capacity + r_current_a + r_std + r_distance
 
@@ -391,15 +395,15 @@ config_dict2 = {
     "num_workers": 4,
     "num_gpus": 0,          # Set to 0 if you don't have a GPU
     "num_envs_per_worker": 2,
-    "actor_lr": 1e-2,
-    "critic_lr": 1e-2,
-    "alpha_lr": 5e-3,
+    "actor_lr": 1e-4,
+    "critic_lr": 1e-4,
+    "alpha_lr": 5e-5,
     "normalize_actions": True,
     "normalize_observations": False,
     "clip_rewards": False,
     "target_entropy": "auto",
     "entropy_coeff": "auto",  # Automatically adjust entropy coefficient
-    "explore": True,  # Enable exploration
+    "explore": False,  # Enable exploration
     "rollout_fragment_length": 75,   # Must be >= max_seq_len
     "train_batch_size": 1024,         # To hold multiple sequences
     "logger_config": {
@@ -414,8 +418,8 @@ config_dict2 = {
     "rl_module": {
         "model_config": {
             "use_lstm": False,
-            "lstm_cell_size": 64,
-            "max_seq_len": 50,
+            "lstm_cell_size": 32,
+            "max_seq_len": 75,
             "lstm_use_prev_action": True,
             "lstm_use_prev_reward": True,
             "fcnet_hiddens": [32, 16],
@@ -546,9 +550,9 @@ config_dict6 = {
     "num_workers": 4,
     "num_gpus":0,          # Set to 0 if you don't have a GPU
     "num_envs_per_worker": 2,
-    "actor_lr": 1e-4,
-    "critic_lr": 1e-4,
-    "alpha_lr": 1e-4,
+    "actor_lr": 1e-3,
+    "critic_lr": 1e-3,
+    "alpha_lr": 1e-3,
     "lr": 5e-5,
     "entropy_coeff": 0.001,
     "vf_loss_coeff": 0.2,
@@ -603,7 +607,7 @@ stop_criteria_PPO = {
 
 from ray.tune.logger import TBXLogger
 from ray.tune.logger import pretty_print
-
+from ray.tune.logger import CSVLoggerCallback
 
 results1 = tune.run(
     "SAC",
@@ -616,7 +620,8 @@ results1 = tune.run(
     checkpoint_freq=5,                           
     keep_checkpoints_num=3,                      
     checkpoint_score_attr="episode_reward_mean", # Maximize by default
-    log_to_file=True,  # it force to log all the results to a file
+    log_to_file=True,  
+    callbacks=[CSVLoggerCallback()]
 )
 
 
@@ -633,7 +638,8 @@ results2 = tune.run(
     checkpoint_freq=5,                           # Checkpoint every 5 iterations
     keep_checkpoints_num=3,                      # Keep only top 3
     checkpoint_score_attr="episode_reward_mean", # Use max episode return for ranking
-    log_to_file=True,  # it force to log all the results to a file  
+    log_to_file=True,  
+    callbacks=[CSVLoggerCallback()] 
 )
 # from rllib_contrib.td3 import TD3
 # from your_local_td3_module import TD3Trainer
@@ -681,6 +687,7 @@ results5 = tune.run(
     keep_checkpoints_num=3,                      # Keep only top 3
     checkpoint_score_attr="episode_reward_mean", # Use max episode return for ranking
     log_to_file=True,
+    callbacks=[CSVLoggerCallback()]
 )
 
 results6 = tune.run(
@@ -695,6 +702,7 @@ results6 = tune.run(
     keep_checkpoints_num=3,                      # Keep only top 3
     checkpoint_score_attr="episode_reward_mean", # Use max episode return for ranking
     log_to_file=True,
+    callbacks=[CSVLoggerCallback()]
 )
 
 
@@ -1014,7 +1022,7 @@ while not done:
     returns.append(total_reward)
     if done or truncated or counter ==8000:
         info_hist = info
-        print("SOC :", info_hist['battery_SOC'][-1])
+        print("SOC :", info_hist['battery_SOC'][-1], "Q", info_hist['battery_capacity'][-1])
         break
 env.close()
 
@@ -1094,42 +1102,57 @@ battery    = ECM_RC_Battery()
 capacitor = Supercapacitor(C=500, R_esr=0.01, V_init=16, dt=1.0)
 SOC1=[]
 SOC2=[]
-for i in range(1000):
-    # V_bat, SOC, Q, V_RC = battery.step(action[i,0]/60)
-    V_out, V_SC = capacitor.step(action[i,1])
-    print(f"\t Step {i+1}: \t SOC: {V_out}, \t Capacity: {V_SC}")
-    SOC1.append(V_SC)
-    if V_SC <= 2:
+for i in range(len(action)):
+    V_bat, SOC, Q, V_RC = battery.step(action[i,0]/60)
+    # V_out, V_SC = capacitor.step(action[i,1])
+    print(f"\t Step {i+1}: \t SOC: {SOC}, \t Capacity: {Q}")
+    SOC1.append(SOC)
+    SOC2.append(Q)
+    if V_bat <= 2:
         print("Battery SOC is too low, stopping simulation.")
         break
 
-for i in range(1000):
-    # V_bat, SOC, Q, V_RC = battery.step(action[i,0]/60)
-    V_out, V_SC = capacitor.step(np.random.uniform(np.min(action[:,1]),np.max(action[:,1])))
-    print(f"\t Step {i+1}: \t SOC: {V_out}, \t Capacity: {V_SC}")
-    SOC2.append(V_SC)
-    if V_SC <= 2:
-        print("Battery SOC is too low, stopping simulation.")
-        break
+# for i in range(1000):
+#     V_out, V_SC = capacitor.step(np.random.uniform(np.min(action[:,1]),np.max(action[:,1])))
+#     print(f"\t Step {i+1}: \t SOC: {V_out}, \t Capacity: {V_SC}")
+#     SOC2.append(V_SC)
+#     if V_SC <= 2:
+#         print("Battery SOC is too low, stopping simulation.")
+#         break
 
 
-for i in range(1000):
-    V_bat, SOC, Q, V_RC = battery.step(np.random.uniform(np.min(i_dc_estimate),np.max(i_dc_estimate))/60)
-    # print(f"\t Step {i+1}: \t SOC: {SOC}, \t Capacity: {Q}")
-    SOC2.append(SOC)
-    if SOC <= 0.05:
-        print("Battery SOC is too low, stopping simulation.")
-        break
+# for i in range(1000):
+#     V_bat, SOC, Q, V_RC = battery.step(np.random.uniform(np.min(i_dc_estimate),np.max(i_dc_estimate))/60)
+#     # print(f"\t Step {i+1}: \t SOC: {SOC}, \t Capacity: {Q}")
+#     SOC2.append(SOC)
+#     if SOC <= 0.05:
+#         print("Battery SOC is too low, stopping simulation.")
+#         break
 
 plt.figure(figsize=(10, 6))
-plt.plot(SOC1           , label='low_pass'            , color='gold')
-plt.plot(SOC2           , label='random'              , color='black')
+# plt.plot(SOC1           , label='SOC'            , color='gold')
+plt.plot(SOC2           , label='Q'              , color='black')
 plt.title('Low-pass Filtered Signal')
 plt.xlabel('Sample Number')
 plt.ylabel('Amplitude')
 plt.legend()
 plt.grid()
 plt.show()  
+
+
+# Effect of ai on Q
+fig, axes = plt.subplots(2, 1, figsize=(8, 6))  # 2 rows, 1 column
+
+x = np.linspace(0, 10, 100)
+axes[0].plot(action[:,0]/60)
+axes[0].set_title("Current")
+
+axes[1].plot(SOC2)
+axes[1].set_title("Q")
+
+plt.tight_layout()
+plt.show()
+
 
 ################################ testing Algo ( testing and training ENV must be the same) ##################
 from ray.rllib.algorithms.sac import SAC
@@ -1271,3 +1294,48 @@ plt.grid()
 plt.show() 
 
 
+################################## Plotting reward components ############################################################################################
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Load progress.csv from both versions
+PPO_predict             = pd.read_csv("/home/armin/ray_results/PPO-Experiment/PPO_MyCustomEnv_1a126_00000_0_2025-07-06_01-50-20/progress.csv")
+PPO_LSTM_predict        = pd.read_csv("/home/armin/ray_results/PPO-LSTM-Experiment/PPO_MyCustomEnv_f0aee_00000_0_2025-07-06_01-34-52/progress.csv")
+PPO_nopredict           = pd.read_csv("/home/armin/ray_results/PPO_results_Nopredict/PPO_MyCustomEnv_3c4e9_00000_0_2025-07-06_10-41-00/progress.csv")
+PPO_LSTM_nopredict      = pd.read_csv("/home/armin/ray_results/PPO_LSTM_results_Nopredict/PPO_MyCustomEnv_7484d_00000_0_2025-07-06_02-28-39/progress.csv")
+
+SAC_predict             = pd.read_csv("/home/armin/ray_results/SAC-Experiment/SAC_MyCustomEnv_24ef6_00000_0_2025-07-07_12-05-04/progress.csv")
+SAC_LSTM_predict        = pd.read_csv("/home/armin/ray_results/SAC-LSTM-Experiment/SAC_MyCustomEnv_31f8f_00000_0_2025-07-07_11-51-07/progress.csv")
+SAC_nopredict           = pd.read_csv("/home/armin/ray_results/SAC_results_Nopredict/SAC_MyCustomEnv_a4c9d_00000_0_2025-07-06_02-08-32/progress.csv")
+SAC_LSTM_nopredict      = pd.read_csv("/home/armin/ray_results/SAC_LSTM_results_Nopredict/SAC_MyCustomEnv_05714_00000_0_2025-07-06_01-49-45/progress.csv")
+
+TD3_predict             = pd.read_csv("/home/armin/ray_results/TD3_results_prediction/TD3_MyCustomEnv_28a48_00000_0_2025-07-06_13-25-06/progress.csv")
+TD3_LSTM_predict        = pd.read_csv("/home/armin/ray_results/TD3_LSTM_results_prediction/TD3_MyCustomEnv_a6914_00000_0_2025-07-06_13-07-09/progress.csv")
+TD3_nopredict           = pd.read_csv("/home/armin/ray_results/TD3_results_Nopredict/TD3_MyCustomEnv_fa02d_00000_0_2025-07-06_12-48-00/progress.csv")
+TD3_LSTM_nopredict      = pd.read_csv("/home/armin/ray_results/TD3_LSTM_results_Nopredict/TD3_MyCustomEnv_718bb_00000_0_2025-07-06_12-22-43/progress.csv")
+
+# Choose the reward metric you want (most common: 'episode_reward_mean')
+reward_key = 'episode_reward_mean'  # sometimes it's 'custom_metrics/total_reward_mean'
+
+plt.plot(PPO_predict[reward_key],       label='PPO_predict',        linewidth=2)
+plt.plot(PPO_LSTM_predict[reward_key],  label='PPO_LSTM_predict',   linewidth=2)
+# plt.plot(PPO_nopredict[reward_key],     label='PPO_predict',        linewidth=2)
+# plt.plot(PPO_LSTM_nopredict[reward_key],label='PPO_LSTM_predict',   linewidth=2)
+
+plt.plot(SAC_predict[reward_key],       label='SAC_predict',        linewidth=2)
+plt.plot(SAC_LSTM_predict[reward_key],  label='SAC_LSTM_predict',   linewidth=2)
+# plt.plot(SAC_nopredict[reward_key],     label='SAC_predict',        linewidth=2)
+# plt.plot(SAC_LSTM_nopredict[reward_key],label='SAC_LSTM_predict',   linewidth=2)
+
+# plt.plot(TD3_predict[reward_key],       label='TD3_predict',        linewidth=2)
+# plt.plot(TD3_LSTM_predict[reward_key],  label='TD3_LSTM_predict',   linewidth=2)
+# plt.plot(TD3_nopredict[reward_key],     label='TD3_predict',        linewidth=2)
+# plt.plot(TD3_LSTM_nopredict[reward_key],label='TD3_LSTM_predict',   linewidth=2)
+
+plt.xlabel("Training Iterations")
+plt.ylabel("Mean Episode Reward")
+plt.title("Reward Comparison")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()

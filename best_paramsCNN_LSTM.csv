@@ -1,7 +1,0 @@
-Parameter,Value
-num_kernels1,81
-num_kernels2,33
-kernel_size,4
-num_hiddens,121
-alpha,2.3164250331536547e-05
-l1_coef,7.013013869659968e-05
