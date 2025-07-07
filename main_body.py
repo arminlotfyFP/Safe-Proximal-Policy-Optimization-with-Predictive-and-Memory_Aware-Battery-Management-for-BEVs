@@ -296,7 +296,7 @@ class MyGymEnv(Env):
         self.current_buffer.append(self.battery_current)
         r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 1 else 0
         # Distance
-        r_distance = 20000*(1 / (1+ abs(self.end_counter - self.step_count)))
+        r_distance = np.clip(20000*(1 / (1+ abs(self.end_counter - self.step_count))),0,10)
         # SOC??????????
 
         reward_temp = r_current + r_capacity + r_current_a + r_std + r_distance
@@ -918,7 +918,7 @@ class MyEvalEnv(Env):
         r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 1 else 0
         self.R_current_a.append(r_current_a)
 
-        r_distance = 20000*(1 / (1+ abs(self.end_counter - self.step_count))) ###### chaning for balancing
+        r_distance = np.clip(20000*(1 / (1+ abs(self.end_counter - self.step_count))),0,10)
         self.R_distance.append(r_distance)
 
         reward_temp = r_current + r_capacity + r_current_a + r_std + r_distance
@@ -1217,6 +1217,8 @@ obs, info = env1.reset()
 done = False
 truncated = False
 total_reward = 0.0
+action_mem =[]
+reward = []
 info_hist_SAC_LSTM = {}
 info_hist_SAC_LSTM[("STD", "r_current", "r_capacity", "r_current_a", "r_distance", "Reward")] = {}
 
@@ -1229,16 +1231,20 @@ info_hist_PPO_LSTM[("STD", "r_current", "r_capacity", "r_current_a", "r_distance
 info_hist_PPO = {}
 info_hist_PPO[("battery_I_history", "SC_I_history", "r_capacity", "r_current_a", "r_distance", "Reward")] = {}
 
+info_hist_lowpass = {}
+# SAC-LSTM
 while not (done or truncated):
-    action = algo_SAC_LSTM.compute_single_action(obs, explore=False)  # Do NOT overwrite algo.config
+    action = algo_SAC_LSTM.compute_single_action(obs, explore=False) 
     obs, reward, done, truncated, info = env.step(action)
     total_reward += reward
+    action_mem.append(action)
     if done or truncated or counter ==len(i_dc_estimate):
         info_hist_SAC_LSTM = info
+        print("Done:", done, "Truncated:", truncated)
         break
 env1.close()
 
-
+# SAC
 obs, info = env2.reset()
 done = False
 truncated = False
@@ -1252,6 +1258,7 @@ while not (done or truncated):
         break
 env2.close()
 
+# PPO LSTM
 obs, info = env3.reset()
 done = False
 truncated = False
@@ -1265,7 +1272,7 @@ while not (done or truncated):
         break
 env3.close()
 
-
+# PPO
 obs, info = env4.reset()
 done = False
 truncated = False
@@ -1279,14 +1286,51 @@ while not (done or truncated):
         break
 env4.close()
 
+# Low pass filter
+for i in range(len(i_dc_estimate)):
 
+    obs, reward, done, truncated, info = env1.step(action[i,:])
+    action_mem.append(action[i,:])
+    total_reward += reward
+    counter += 1
+    print(f"Step {counter}, \t Reward: {reward:.3f}")
+    if done or truncated:
+        info_hist_lowpass = info
+        print("SOC :", info_hist_lowpass['battery_SOC'][-1], "\t Done:", done, "\t Truncated:", truncated, "SC Voltage:", info_hist_lowpass['SC_voltage'][-1])
+        break
+
+env.close()
 
 plt.figure(figsize=(10, 6))
-plt.plot(info_hist_SAC_LSTM['reward'][:-8000]                   , label='SAC_LSTM'           , color='red')
-plt.plot(info_hist_SAC['battery_I_history'][:-8000]                       , label='SAC'                , color='black')
-# plt.plot(info_hist_PPO_LSTM['reward']                   , label='PPO_LSTM'           , color='blue')
-# plt.plot(info_hist_PPO['battery_I_history']                        , label='PPO'                , color='magenta')
-plt.title('Low-pass Filtered Signal')
+plt.plot(info_hist_SAC_LSTM['STD']                  , label='STD'           , color='red')
+plt.plot(info_hist_SAC_LSTM['r_current']            , label='r_current'     , color='black')
+plt.plot(info_hist_SAC_LSTM['r_capacity']           , label='r_capacity'    , color='blue')
+plt.plot(info_hist_SAC_LSTM['r_current_a']          , label='r_current_a'   , color='green')
+plt.plot(info_hist_SAC_LSTM['r_distance']           , label='r_distance'    , color='gold')
+plt.title('Reward monitoring')
+plt.xlabel('Sample Number')
+plt.ylabel('Amplitude')
+plt.legend()
+plt.grid()
+plt.show() 
+
+plt.figure(figsize=(10, 6))
+plt.plot(info_hist_lowpass['STD']                  , label='STD'           , color='red')
+plt.plot(info_hist_lowpass['r_current']            , label='r_current'     , color='black')
+plt.plot(info_hist_lowpass['r_capacity']           , label='r_capacity'    , color='blue')
+plt.plot(info_hist_lowpass['r_current_a']          , label='r_current_a'   , color='green')
+plt.plot(info_hist_lowpass['r_distance']           , label='r_distance'    , color='gold')
+plt.title('Reward monitoring')
+plt.xlabel('Sample Number')
+plt.ylabel('Amplitude')
+plt.legend()
+plt.grid()
+plt.show() 
+
+plt.figure(figsize=(10, 6))
+plt.plot(action_mem[:,0]                  , label='batt'           , color='red')
+plt.plot(action_mem[:,1]                  , label='SC'           , color='blue')
+plt.title('Reward monitoring')
 plt.xlabel('Sample Number')
 plt.ylabel('Amplitude')
 plt.legend()
