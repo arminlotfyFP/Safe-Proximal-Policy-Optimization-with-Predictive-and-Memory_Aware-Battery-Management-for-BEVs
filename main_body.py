@@ -305,7 +305,7 @@ class MyGymEnv(Env):
         self.current_buffer.append(self.battery_current)
         r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 1 else 0
         # Distance
-        r_distance = np.clip(20*(abs(self.end_counter - self.step_count)/self.end_counter), 0, 20)
+        r_distance = -np.clip(20*(abs(self.end_counter - self.step_count)/self.end_counter), 0, 20)
         # SOC??????????
 
         reward_temp = r_current + r_capacity + r_current_a + r_std + r_distance
