@@ -308,7 +308,7 @@ class MyGymEnv(Env):
         r_capacity = -50 * abs(self.battery_capacity - Q)
         #Derivative current
         self.current_buffer.append(self.battery_current)
-        r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 1 else 0
+        r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 2 else 0
         # Distance
         r_distance = -np.clip(40*(abs(self.end_counter - self.step_count)/self.end_counter), 0, 40)
         # SOC??????????
@@ -886,7 +886,7 @@ class MyEvalEnv(Env):
         self.battery_current    = float(np.clip(action[0], self.action_space.low[0], self.action_space.high[0]))
         self.SC_current         = float(np.clip(self.input_current - self.battery_current, self.action_space.low[0], self.action_space.high[0]))
         battery_current_cell    = action[0]/self.n_batt_par
-        SC_current_cell         = action[1]/1 # We don not have parallel SCs in this case  
+        SC_current_cell         = self.SC_current/1 # We don not have parallel SCs in this case  
         
         V_bat, SOC, Q, V_RC = self.battery.step(battery_current_cell)
         V_SC, V_sc = self.sc.step(SC_current_cell)
@@ -937,7 +937,7 @@ class MyEvalEnv(Env):
         self.R_capacity.append(r_capacity)
 
         self.current_buffer.append(self.battery_current)
-        r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 1 else 0
+        r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 2 else 0
         self.R_current_a.append(r_current_a)
 
         r_distance = -np.clip(40*(abs(self.end_counter - self.step_count)/self.end_counter), 0, 40)
@@ -1242,7 +1242,7 @@ obs, info = env1.reset()
 done = False
 truncated = False
 total_reward = 0.0
-action_mem = np.empty((0, 2))
+action_mem = np.empty((0, 1))
 reward = []
 info_hist_SAC_LSTM = {}
 info_hist_SAC_LSTM[("STD", "r_current", "r_capacity", "r_current_a", "r_distance", "Reward")] = {}
@@ -1261,13 +1261,13 @@ info_hist_lowpass = {}
 while not (done or truncated):
     action = algo_SAC_LSTM.compute_single_action(obs, explore=False)
     obs, reward, done, truncated, info = env1.step(action) 
-    action_mem = np.append(action_mem, [action], axis=0)
-    total_reward += reward
-    counter += 1
-    print(f"Step {i}, \t Reward: {reward:.3f}")
+    # action_mem = np.append(action_mem, [action], axis=0)
+    # total_reward += reward
+    # counter += 1
+    # print(f"Step {i}, \t Reward: {reward:.3f}")
     if done or truncated:
         info_hist_SAC_LSTM = info
-        print("SOC :", info_hist_SAC_LSTM['battery_SOC'][-1], "\t Done:", done, "\t Truncated:", truncated, "battery_capacity:", info_hist_SAC_LSTM['battery_capacity'][-1])
+        # print("SOC :", info_hist_SAC_LSTM['battery_SOC'][-1], "\t Done:", done, "\t Truncated:", truncated, "battery_capacity:", info_hist_SAC_LSTM['battery_capacity'][-1])
         break
 
 env1.close()
