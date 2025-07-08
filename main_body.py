@@ -123,13 +123,22 @@ class ECM_RC_Battery:
         V_bat = V_oc - I_bat * self.R0 - self.V_RC
 
         # Capacity fade update (increment by one cycle if fully charged/discharged)
-        if self.SOC == 0 or self.SOC == 1.0:
-            # self.cycle_count += 1
-            # self.Q = self.Q_init * (1 - self.alpha * self.cycle_count)
-            pass
+        aging_loss = 0.0
+        if 0 < self.SOC < 1.0:
+            aging_loss = self.ai * 0.00005
+
+        # Coulombic loss
+        if abs(I_bat) < 3 * self.Q:
+            coulombic_loss = 0.1 * abs(I_bat) * self.dt / 3600
         else:
-            self.Q = self.Q-self.ai*0.000_05  - 0.1*(abs(I_bat) * self.dt) / 3600 if abs(I_bat)< 3*self.Q else self.Q-self.ai*0.000_05 - 3*0.1*((abs(I_bat) * self.dt) / 3600) 
-        self.Q = max(self.Q, 0.0)
+            coulombic_loss = 3 * 0.1 * abs(I_bat) * self.dt / 3600
+
+        # Total capacity loss
+        total_loss = aging_loss + coulombic_loss
+
+        # Safe update
+        Q_new = self.Q - total_loss
+        self.Q = max(Q_new, 0.0)
 
         return V_bat, self.SOC, self.Q, self.V_RC
 
@@ -277,8 +286,8 @@ class MyGymEnv(Env):
                             self.SC_current/np.max(self.i_dc_estimate), Q/self.battery_capacity, self.battery_SOC, np.clip(self.SC_voltage/110,0.0,1.0)], dtype=np.float32)
         
         # Stop conditions section
-        self.truncated = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110
-        self.terminated = self.step_count + self.start_idx >= self.end_counter - 1  #############################
+        self.truncated = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110 or Q <= 0
+        self.terminated = self.step_count + self.start_idx >= self.end_counter - 1  
         
         
         # Define reward sections:
@@ -291,17 +300,20 @@ class MyGymEnv(Env):
         self.output_current.append(sum_current)
         r_current = -10*abs(sum_current-self.input_current)
         #Capacity
-        r_capacity = -500 * abs(self.battery_capacity - Q)
+        r_capacity = -50 * abs(self.battery_capacity - Q)
         #Derivative current
         self.current_buffer.append(self.battery_current)
         r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 1 else 0
         # Distance
-        r_distance = np.clip(20000*(1 / (1+ abs(self.end_counter - self.step_count))),0,10)
+        r_distance = np.clip(20*(abs(self.end_counter - self.step_count)/self.end_counter), 0, 20)
         # SOC??????????
 
         reward_temp = r_current + r_capacity + r_current_a + r_std + r_distance
 
-        reward = float(np.clip(reward_temp, -1e3, 1e4)) if self.truncated == False else 100 * reward_temp
+        reward = float(np.clip(reward_temp, -1e3, 1e4)) if self.truncated == False else -abs((self.step_count + self.start_idx) - \
+                                                                                                self.end_counter) + r_current + r_capacity +  \
+                                                                                                + r_current_a + r_std -100
+        reward = reward + 200 if self.terminated else reward
         self.reward.append(reward)
         assert not np.isnan(self.state).any(), "NaN in observation"
         assert not np.isnan(reward), "NaN in reward"
@@ -595,7 +607,7 @@ warnings.filterwarnings("ignore")
 
 # --------- TRAINING -----------
 stop_criteria = {
-    "training_iteration": 500, # Set a high number for iterations
+    "training_iteration": 1000, # Set a high number for iterations
     #"episode_reward_mean": -10,    # Stop when mean reward reaches 200
 }
 
@@ -895,7 +907,7 @@ class MyEvalEnv(Env):
         self.state = np.array([self.input_current/np.max(self.i_dc_estimate), self.future_current/np.max(self.i_dc_estimate), self.battery_current/np.max(self.i_dc_estimate),
                             self.SC_current/np.max(self.i_dc_estimate), Q/self.battery_capacity, self.battery_SOC, np.clip(self.SC_voltage/16,0.0,1.0)], dtype=np.float32)
         
-        self.truncated  = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110
+        self.truncated  = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110 or Q <= 0
         self.terminated = self.step_count >= self.end_counter - 1
         
         
@@ -911,14 +923,14 @@ class MyEvalEnv(Env):
         r_current = -10*abs(sum_current-self.input_current)
         self.R_current.append(r_current)
 
-        r_capacity = -500 * abs(self.battery_capacity - Q)
+        r_capacity = -50 * abs(self.battery_capacity - Q)
         self.R_capacity.append(r_capacity)
 
         self.current_buffer.append(self.battery_current)
         r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 1 else 0
         self.R_current_a.append(r_current_a)
 
-        r_distance = np.clip(20000*(1 / (1+ abs(self.end_counter - self.step_count))),0,10)
+        r_distance = np.clip(100 * (1 / np.sqrt(1 + abs(self.end_counter - self.step_count))), 0, 15)
         self.R_distance.append(r_distance)
 
         reward_temp = r_current + r_capacity + r_current_a + r_std + r_distance
@@ -1217,7 +1229,7 @@ obs, info = env1.reset()
 done = False
 truncated = False
 total_reward = 0.0
-action_mem =[]
+action_mem = np.empty((0, 2))
 reward = []
 info_hist_SAC_LSTM = {}
 info_hist_SAC_LSTM[("STD", "r_current", "r_capacity", "r_current_a", "r_distance", "Reward")] = {}
@@ -1234,15 +1246,65 @@ info_hist_PPO[("battery_I_history", "SC_I_history", "r_capacity", "r_current_a",
 info_hist_lowpass = {}
 # SAC-LSTM
 while not (done or truncated):
-    action = algo_SAC_LSTM.compute_single_action(obs, explore=False) 
-    obs, reward, done, truncated, info = env.step(action)
+    action = algo_SAC_LSTM.compute_single_action(obs, explore=False)
+    obs, reward, done, truncated, info = env1.step(action) 
+    action_mem = np.append(action_mem, [action], axis=0)
     total_reward += reward
-    action_mem.append(action)
-    if done or truncated or counter ==len(i_dc_estimate):
+    counter += 1
+    print(f"Step {i}, \t Reward: {reward:.3f}")
+    if done or truncated:
         info_hist_SAC_LSTM = info
-        print("Done:", done, "Truncated:", truncated)
+        print("SOC :", info_hist_SAC_LSTM['battery_SOC'][-1], "\t Done:", done, "\t Truncated:", truncated, "battery_capacity:", info_hist_SAC_LSTM['battery_capacity'][-1])
         break
+
 env1.close()
+
+# PARAMETERS MONITORING SECTION
+fig, ax = plt.subplots(1, 2, figsize=(10, 6))
+ax[0].plot(info_hist_SAC_LSTM['battery_SOC']         , label='battery_SOC'         , color='red')
+ax[0].plot(info_hist_SAC_LSTM['battery_voltage']     , label='battery_voltage'     , color='blue')
+ax[0].plot(info_hist_SAC_LSTM['SC_voltage']          , label='SC_voltage'          , color='green')
+
+ax[1].plot(info_hist_SAC_LSTM['battery_capacity']    , label='battery_capacity'    , color='black')
+fig.suptitle("Battery Monitoring Parameters", fontsize=16)
+fig.supxlabel("Sample Number", fontsize=12)
+fig.supylabel("Amplitude", fontsize=12)
+ax[0].legend()
+ax[1].legend()
+ax[0].grid(True)
+ax[1].grid(True)
+plt.show() 
+
+# REWARD SECTION
+plt.figure(figsize=(10, 6))
+plt.plot(info_hist_SAC_LSTM['STD']                  , label='STD'           , color='red')
+plt.plot(info_hist_SAC_LSTM['r_current']            , label='r_current'     , color='black')
+plt.plot(info_hist_SAC_LSTM['r_capacity']           , label='r_capacity'    , color='blue')
+plt.plot(info_hist_SAC_LSTM['r_current_a']          , label='r_current_a'   , color='green')
+plt.plot(info_hist_SAC_LSTM['r_distance']           , label='r_distance'    , color='gold')
+plt.title('Reward monitoring')
+# fig.suptitle('Reward monitoring')
+plt.xlabel('Sample Number')
+plt.ylabel('Amplitude')
+plt.legend()
+plt.grid()
+plt.show() 
+
+# ACTION SECTION
+plt.figure(figsize=(10, 6))
+plt.plot(info_hist_SAC_LSTM['requested_I_history']   , label='requested_I_history'   , color='red')
+plt.plot(info_hist_SAC_LSTM['provided_I_history']    , label='provided_I_history'    , color='green')
+plt.plot(action_mem[:,0]                            , label='batt'                  , color='gold')
+plt.plot(action_mem[:,1]                            , label='SC'                    , color='blue')
+plt.title('Reward monitoring')
+plt.xlabel('Sample Number')
+plt.ylabel('Amplitude')
+plt.legend()
+plt.grid()
+plt.show() 
+
+
+
 
 # SAC
 obs, info = env2.reset()
@@ -1287,33 +1349,39 @@ while not (done or truncated):
 env4.close()
 
 # Low pass filter
+counter=0
+action_mem = np.empty((0, 2))
 for i in range(len(i_dc_estimate)):
 
     obs, reward, done, truncated, info = env1.step(action[i,:])
-    action_mem.append(action[i,:])
+    action_mem = np.append(action_mem, [action[i, :]], axis=0)
     total_reward += reward
     counter += 1
-    print(f"Step {counter}, \t Reward: {reward:.3f}")
+    print(f"Step {i}, \t Reward: {reward:.3f}")
     if done or truncated:
         info_hist_lowpass = info
-        print("SOC :", info_hist_lowpass['battery_SOC'][-1], "\t Done:", done, "\t Truncated:", truncated, "SC Voltage:", info_hist_lowpass['SC_voltage'][-1])
+        print("SOC :", info_hist_lowpass['battery_SOC'][-1], "\t Done:", done, "\t Truncated:", truncated, "battery_capacity:", info_hist_lowpass['battery_capacity'][-1])
         break
 
-env.close()
+env1.close()
 
-plt.figure(figsize=(10, 6))
-plt.plot(info_hist_SAC_LSTM['STD']                  , label='STD'           , color='red')
-plt.plot(info_hist_SAC_LSTM['r_current']            , label='r_current'     , color='black')
-plt.plot(info_hist_SAC_LSTM['r_capacity']           , label='r_capacity'    , color='blue')
-plt.plot(info_hist_SAC_LSTM['r_current_a']          , label='r_current_a'   , color='green')
-plt.plot(info_hist_SAC_LSTM['r_distance']           , label='r_distance'    , color='gold')
-plt.title('Reward monitoring')
-plt.xlabel('Sample Number')
-plt.ylabel('Amplitude')
-plt.legend()
-plt.grid()
+# PARAMETERS MONITORING SECTION
+fig, ax = plt.subplots(1, 2, figsize=(10, 6))
+ax[0].plot(info_hist_lowpass['battery_SOC']         , label='battery_SOC'         , color='red')
+ax[0].plot(info_hist_lowpass['battery_voltage']     , label='battery_voltage'     , color='blue')
+ax[0].plot(info_hist_lowpass['SC_voltage']          , label='SC_voltage'          , color='green')
+
+ax[1].plot(info_hist_lowpass['battery_capacity']    , label='battery_capacity'    , color='black')
+fig.suptitle("Battery Monitoring Parameters", fontsize=16)
+fig.supxlabel("Sample Number", fontsize=12)
+fig.supylabel("Amplitude", fontsize=12)
+ax[0].legend()
+ax[1].legend()
+ax[0].grid(True)
+ax[1].grid(True)
 plt.show() 
 
+# REWARD SECTION
 plt.figure(figsize=(10, 6))
 plt.plot(info_hist_lowpass['STD']                  , label='STD'           , color='red')
 plt.plot(info_hist_lowpass['r_current']            , label='r_current'     , color='black')
@@ -1321,15 +1389,19 @@ plt.plot(info_hist_lowpass['r_capacity']           , label='r_capacity'    , col
 plt.plot(info_hist_lowpass['r_current_a']          , label='r_current_a'   , color='green')
 plt.plot(info_hist_lowpass['r_distance']           , label='r_distance'    , color='gold')
 plt.title('Reward monitoring')
+# fig.suptitle('Reward monitoring')
 plt.xlabel('Sample Number')
 plt.ylabel('Amplitude')
 plt.legend()
 plt.grid()
 plt.show() 
 
+# ACTION SECTION
 plt.figure(figsize=(10, 6))
-plt.plot(action_mem[:,0]                  , label='batt'           , color='red')
-plt.plot(action_mem[:,1]                  , label='SC'           , color='blue')
+plt.plot(info_hist_lowpass['requested_I_history']   , label='requested_I_history'   , color='red')
+plt.plot(info_hist_lowpass['provided_I_history']    , label='provided_I_history'    , color='green')
+plt.plot(action_mem[:,0]                            , label='batt'                  , color='gold')
+plt.plot(action_mem[:,1]                            , label='SC'                    , color='blue')
 plt.title('Reward monitoring')
 plt.xlabel('Sample Number')
 plt.ylabel('Amplitude')
