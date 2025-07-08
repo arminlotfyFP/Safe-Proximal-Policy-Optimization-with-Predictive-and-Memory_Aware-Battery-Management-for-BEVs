@@ -142,8 +142,8 @@ class ECM_RC_Battery:
 
         return V_bat, self.SOC, self.Q, self.V_RC
 
-min_current = -np.min(i_dc_estimate)    #########################
-max_current =  np.max(i_dc_estimate)    #########################
+min_current =   np.min(i_dc_estimate)    #########################
+max_current =   np.max(i_dc_estimate)    #########################
 # Define my GymEnvironment:
 # input_current, future_current, battery_current, SC_current, battery_capacity,battery_SOC, SC_voltage
 class MyGymEnv(Env):
@@ -256,8 +256,8 @@ class MyGymEnv(Env):
         return self.state, {}
 
     def step(self, action):
-        self.battery_current    = np.clip(action, self.action_space.low, self.action_space.high)
-        self.SC_current         = self.input_current - self.battery_current
+        self.battery_current    = float(np.clip(action[0], self.action_space.low[0], self.action_space.high[0]))
+        self.SC_current         = float(np.clip(self.input_current - self.battery_current, self.action_space.low[0], self.action_space.high[0]))
         battery_current_cell    = self.battery_current/self.n_batt_par
         SC_current_cell         = self.SC_current/1 # We do not have parallel SCs in this case  
         
@@ -282,8 +282,13 @@ class MyGymEnv(Env):
         self.requested_I_hist.append(self.input_current)                    
         self.provided_I_hist.append(self.battery_current + self.SC_current)
 
-        self.state = np.array([self.input_current/np.max(self.i_dc_estimate), self.future_current/np.max(self.i_dc_estimate), self.battery_current/np.max(self.i_dc_estimate),
-                            self.SC_current/np.max(self.i_dc_estimate), Q/self.battery_capacity, self.battery_SOC, np.clip(self.SC_voltage/110,0.0,1.0)], dtype=np.float32)
+        self.state = np.array([self.input_current/np.max(self.i_dc_estimate),
+                                self.future_current/np.max(self.i_dc_estimate),
+                                self.battery_current/np.max(self.i_dc_estimate),
+                                self.SC_current/np.max(self.i_dc_estimate),
+                                Q/self.battery_capacity,
+                                self.battery_SOC,
+                                np.clip(self.SC_voltage/110,0.0,1.0)], dtype=np.float32)
         
         # Stop conditions section
         self.truncated = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110 or Q <= 0 or abs(self.battery_current + self.SC_current-self.input_current) >10
@@ -787,8 +792,8 @@ class MyEvalEnv(Env):
                                             shape=(7,), dtype=np.float32
 )
         
-        self.action_space       = spaces.Box(low=-np.array([min_current,min_current]), 
-                                            high=np.array([max_current,max_current]), shape=(2,), dtype=np.float32)
+        self.action_space       = spaces.Box(low=-np.array([min_current]), 
+                                            high=np.array([max_current]), shape=(1,), dtype=np.float32)
         
         self.input_current      = self.i_dc_estimate[0] + 10* np.random.uniform(-1, 1)
         self.output_current     = []
@@ -878,8 +883,8 @@ class MyEvalEnv(Env):
         return self.state, {}
 
     def step(self, action):
-        self.battery_current    = np.clip(action[0],np.min(self.i_dc_estimate),np.max(self.i_dc_estimate))
-        self.SC_current         = np.clip(action[1],np.min(self.i_dc_estimate),np.max(self.i_dc_estimate))
+        self.battery_current    = float(np.clip(action[0], self.action_space.low[0], self.action_space.high[0]))
+        self.SC_current         = float(np.clip(self.input_current - self.battery_current, self.action_space.low[0], self.action_space.high[0]))
         battery_current_cell    = action[0]/self.n_batt_par
         SC_current_cell         = action[1]/1 # We don not have parallel SCs in this case  
         
@@ -904,8 +909,13 @@ class MyEvalEnv(Env):
 
         
 
-        self.state = np.array([self.input_current/np.max(self.i_dc_estimate), self.future_current/np.max(self.i_dc_estimate), self.battery_current/np.max(self.i_dc_estimate),
-                            self.SC_current/np.max(self.i_dc_estimate), Q/self.battery_capacity, self.battery_SOC, np.clip(self.SC_voltage/16,0.0,1.0)], dtype=np.float32)
+        self.state = np.array([self.input_current/np.max(self.i_dc_estimate),
+                                self.future_current/np.max(self.i_dc_estimate),
+                                self.battery_current/np.max(self.i_dc_estimate),
+                                self.SC_current/np.max(self.i_dc_estimate),
+                                Q/self.battery_capacity,
+                                self.battery_SOC,
+                                np.clip(self.SC_voltage/110,0.0,1.0)], dtype=np.float32)
         
         self.truncated  = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110 or Q <= 0 or abs(self.battery_current + self.SC_current-self.input_current) >10
         self.terminated = self.step_count >= self.end_counter - 1
@@ -996,7 +1006,7 @@ filtered_i = butter_lowpas_filter(i_dc_estimate, 0.00637, 1, order=1)
 
 action = np.zeros((len(i_dc_estimate), 2), dtype=np.float32)
 action[:, 0] = filtered_i
-action[:, 1] = i_dc_estimate - filtered_i
+# action[:, 1] = i_dc_estimate - filtered_i
 
 plt.figure(figsize=(10, 6))
 plt.plot(i_dc_estimate, label='Original Signal', color='black')
@@ -1386,11 +1396,11 @@ plt.show()
 
 # REWARD SECTION
 plt.figure(figsize=(10, 6))
-plt.plot(info_hist_lowpass['STD']                  , label='STD'           , color='red')
+# plt.plot(info_hist_lowpass['STD']                  , label='STD'           , color='red')
 plt.plot(info_hist_lowpass['r_current']            , label='r_current'     , color='black')
-plt.plot(info_hist_lowpass['r_capacity']           , label='r_capacity'    , color='blue')
-plt.plot(info_hist_lowpass['r_current_a']          , label='r_current_a'   , color='green')
-plt.plot(info_hist_lowpass['r_distance']           , label='r_distance'    , color='gold')
+# plt.plot(info_hist_lowpass['r_capacity']           , label='r_capacity'    , color='blue')
+# plt.plot(info_hist_lowpass['r_current_a']          , label='r_current_a'   , color='green')
+# plt.plot(info_hist_lowpass['r_distance']           , label='r_distance'    , color='gold')
 plt.title('Reward monitoring')
 # fig.suptitle('Reward monitoring')
 plt.xlabel('Sample Number')
@@ -1403,8 +1413,8 @@ plt.show()
 plt.figure(figsize=(10, 6))
 plt.plot(info_hist_lowpass['requested_I_history']   , label='requested_I_history'   , color='red')
 plt.plot(info_hist_lowpass['provided_I_history']    , label='provided_I_history'    , color='green')
-plt.plot(action_mem[:,0]                            , label='batt'                  , color='gold')
-plt.plot(action_mem[:,1]                            , label='SC'                    , color='blue')
+# plt.plot(action_mem[:,0]                            , label='batt'                  , color='gold')
+# plt.plot(action_mem[:,1]                            , label='SC'                    , color='blue')
 plt.title('Reward monitoring')
 plt.xlabel('Sample Number')
 plt.ylabel('Amplitude')
