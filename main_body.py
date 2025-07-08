@@ -162,8 +162,8 @@ class MyGymEnv(Env):
                                             shape=(7,), dtype=np.float32
 )
         
-        self.action_space       = spaces.Box(low=-np.array([min_current,min_current]), 
-                                            high=np.array([max_current,max_current]), shape=(2,), dtype=np.float32)
+        self.action_space       = spaces.Box(low=-np.array([min_current]), 
+                                            high=np.array([max_current]), shape=(1,), dtype=np.float32)
         
         self.input_current      = self.i_dc_estimate[0] + 10* np.random.uniform(-1, 1)
         self.output_current     = []
@@ -256,8 +256,8 @@ class MyGymEnv(Env):
         return self.state, {}
 
     def step(self, action):
-        self.battery_current    = np.clip(action[0], self.action_space.low[0], self.action_space.high[0])
-        self.SC_current         = np.clip(action[1], self.action_space.low[1], self.action_space.high[1])
+        self.battery_current    = np.clip(action, self.action_space.low, self.action_space.high)
+        self.SC_current         = self.input_current - self.battery_current
         battery_current_cell    = self.battery_current/self.n_batt_par
         SC_current_cell         = self.SC_current/1 # We do not have parallel SCs in this case  
         
