@@ -286,7 +286,7 @@ class MyGymEnv(Env):
                             self.SC_current/np.max(self.i_dc_estimate), Q/self.battery_capacity, self.battery_SOC, np.clip(self.SC_voltage/110,0.0,1.0)], dtype=np.float32)
         
         # Stop conditions section
-        self.truncated = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110 or Q <= 0
+        self.truncated = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110 or Q <= 0 or abs(self.battery_current + self.SC_current-self.input_current) >10
         self.terminated = self.step_count + self.start_idx >= self.end_counter - 1  
         
         
@@ -298,21 +298,20 @@ class MyGymEnv(Env):
         #Current
         sum_current = self.battery_current + self.SC_current
         self.output_current.append(sum_current)
-        r_current = -10*abs(sum_current-self.input_current)
+        r_current = -abs(sum_current-self.input_current)
         #Capacity
         r_capacity = -50 * abs(self.battery_capacity - Q)
         #Derivative current
         self.current_buffer.append(self.battery_current)
         r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 1 else 0
         # Distance
-        r_distance = -np.clip(20*(abs(self.end_counter - self.step_count)/self.end_counter), 0, 20)
+        r_distance = -np.clip(40*(abs(self.end_counter - self.step_count)/self.end_counter), 0, 40)
         # SOC??????????
 
         reward_temp = r_current + r_capacity + r_current_a + r_std + r_distance
 
         reward = float(np.clip(reward_temp, -1e3, 1e4)) if self.truncated == False else -abs((self.step_count + self.start_idx) - \
-                                                                                                self.end_counter) + r_current + r_capacity +  \
-                                                                                                + r_current_a + r_std -100
+                                                                                                self.end_counter) + reward_temp
         reward = reward + 200 if self.terminated else reward
         self.reward.append(reward)
         assert not np.isnan(self.state).any(), "NaN in observation"
@@ -848,6 +847,7 @@ class MyEvalEnv(Env):
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
+        self.start_idx          = np.random.randint(0, len(self.i_dc_estimate) - 100)
         self.input_current      = self.i_dc_estimate[0] + 10* np.random.uniform(-1, 1)
         self.future_current     = self.i_dc_future[0]   + 10* np.random.uniform(-1, 1)
         self.output_current     = []
@@ -907,7 +907,7 @@ class MyEvalEnv(Env):
         self.state = np.array([self.input_current/np.max(self.i_dc_estimate), self.future_current/np.max(self.i_dc_estimate), self.battery_current/np.max(self.i_dc_estimate),
                             self.SC_current/np.max(self.i_dc_estimate), Q/self.battery_capacity, self.battery_SOC, np.clip(self.SC_voltage/16,0.0,1.0)], dtype=np.float32)
         
-        self.truncated  = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110 or Q <= 0
+        self.truncated  = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110 or Q <= 0 or abs(self.battery_current + self.SC_current-self.input_current) >10
         self.terminated = self.step_count >= self.end_counter - 1
         
         
@@ -920,7 +920,7 @@ class MyEvalEnv(Env):
         sum_current = self.battery_current + self.SC_current
         self.output_current.append(sum_current)
 
-        r_current = -10*abs(sum_current-self.input_current)
+        r_current = -abs(sum_current-self.input_current)
         self.R_current.append(r_current)
 
         r_capacity = -50 * abs(self.battery_capacity - Q)
@@ -930,12 +930,15 @@ class MyEvalEnv(Env):
         r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 1 else 0
         self.R_current_a.append(r_current_a)
 
-        r_distance = np.clip(100 * (1 / np.sqrt(1 + abs(self.end_counter - self.step_count))), 0, 15)
+        r_distance = -np.clip(40*(abs(self.end_counter - self.step_count)/self.end_counter), 0, 40)
         self.R_distance.append(r_distance)
 
         reward_temp = r_current + r_capacity + r_current_a + r_std + r_distance
 
-        reward = float(np.clip(reward_temp, -1e3, 1e4)) #if self.truncated == False else 100 * reward_temp
+        reward = float(np.clip(reward_temp, -1e3, 1e4)) if self.truncated == False else -abs((self.step_count + self.start_idx) - \
+                                                                                                self.end_counter) + r_current + r_capacity +  \
+                                                                                                + r_current_a + r_std -100
+        reward = reward + 200 if self.terminated else reward
         self.reward.append(reward)
 
         # info section                                  #########################################
