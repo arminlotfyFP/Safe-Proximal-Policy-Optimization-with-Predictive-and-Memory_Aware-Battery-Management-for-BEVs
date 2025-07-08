@@ -165,9 +165,9 @@ class MyGymEnv(Env):
         self.action_space       = spaces.Box(low=-np.array([min_current]), 
                                             high=np.array([max_current]), shape=(1,), dtype=np.float32)
         
-        self.input_current      = self.i_dc_estimate[0] + 10* np.random.uniform(-1, 1)
+        self.input_current      = self.i_dc_estimate[0] #+ 10* np.random.uniform(-1, 1)
         self.output_current     = []
-        self.future_current     = self.i_dc_future[0]   + 10* np.random.uniform(-1, 1)
+        self.future_current     = self.i_dc_future[0]   #+ 10* np.random.uniform(-1, 1)
         
 
         # Deining Buffers
@@ -271,10 +271,10 @@ class MyGymEnv(Env):
         self.terminated = self.step_count + self.start_idx >= self.end_counter - 1  
         # Updating counter
         self.step_count += 1
-        # current section
-        # epsilon = np.random.uniform(0, 1)
-        self.input_current      = self.i_dc_estimate[self.step_count+ self.start_idx] #if epsilon > 0.1 else self.i_dc_estimate[self.step_count] + 10* np.random.uniform(0, 1)
-        self.future_current     = self.i_dc_future[self.step_count + self.start_idx]   #if epsilon > 0.1 else self.i_dc_future[self.step_count] + 10* np.random.uniform(0, 1)
+        
+        # Updating current values
+        self.input_current      = self.i_dc_estimate[self.step_count+ self.start_idx] 
+        self.future_current     = self.i_dc_future[self.step_count + self.start_idx]   
 
         # Append to history
         self.V_hist.append(V_bat*self.n_batt_seri)                 
@@ -614,7 +614,7 @@ warnings.filterwarnings("ignore")
 
 # --------- TRAINING -----------
 stop_criteria = {
-    "training_iteration": 1000, # Set a high number for iterations
+    "training_iteration": 500, # Set a high number for iterations
     #"episode_reward_mean": -10,    # Stop when mean reward reaches 200
 }
 
@@ -627,22 +627,21 @@ stop_criteria_PPO = {
 from ray.tune.logger import TBXLogger
 from ray.tune.logger import pretty_print
 from ray.tune.logger import CSVLoggerCallback
-
-results1 = tune.run(
+ 
+results2 = tune.run(
     "SAC",
     config=config_dict1,
     stop=stop_criteria,
     verbose=1,
-    name="SAC-LSTM-Experiment",
+    name="SAC_LSTM-Experiment",
     local_dir="~/SAC_LSTM_results",
-    checkpoint_at_end=True,                      
-    checkpoint_freq=5,                           
-    keep_checkpoints_num=3,                      
-    checkpoint_score_attr="episode_reward_mean", # Maximize by default
+    checkpoint_at_end=True,                      # Save a checkpoint at the end
+    checkpoint_freq=5,                           # Checkpoint every 5 iterations
+    keep_checkpoints_num=3,                      # Keep only top 3
+    checkpoint_score_attr="episode_reward_mean", # Use max episode return for ranking
     log_to_file=True,  
-    callbacks=[CSVLoggerCallback()]
+    callbacks=[CSVLoggerCallback()] 
 )
-
 
 
 
@@ -798,9 +797,9 @@ class MyEvalEnv(Env):
         self.action_space       = spaces.Box(low=-np.array([min_current]), 
                                             high=np.array([max_current]), shape=(1,), dtype=np.float32)
         
-        self.input_current      = self.i_dc_estimate[0] + 10* np.random.uniform(-1, 1)
+        self.input_current      = self.i_dc_estimate[0] #+ 10* np.random.uniform(-1, 1)
         self.output_current     = []
-        self.future_current     = self.i_dc_future[0]   + 10* np.random.uniform(-1, 1)
+        self.future_current     = self.i_dc_future[0]   #+ 10* np.random.uniform(-1, 1)
         
 
         # Deining Buffers
@@ -856,8 +855,8 @@ class MyEvalEnv(Env):
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         self.start_idx          = np.random.randint(0, len(self.i_dc_estimate) - 100)
-        self.input_current      = self.i_dc_estimate[0] + 10* np.random.uniform(-1, 1)
-        self.future_current     = self.i_dc_future[0]   + 10* np.random.uniform(-1, 1)
+        self.input_current      = self.i_dc_estimate[self.start_idx] + 10* np.random.uniform(-1, 1)
+        self.future_current     = self.i_dc_future[self.start_idx]   + 10* np.random.uniform(-1, 1)
         self.output_current     = []
 
         self.battery_current    = 0
@@ -901,10 +900,10 @@ class MyEvalEnv(Env):
         self.terminated = self.step_count + self.start_idx >= self.end_counter - 1  
         # Updating counter
         self.step_count += 1
-        # current section
-        # epsilon = np.random.uniform(0, 1)
-        self.input_current      = self.i_dc_estimate[self.step_count+ self.start_idx] #if epsilon > 0.1 else self.i_dc_estimate[self.step_count] + 10* np.random.uniform(0, 1)
-        self.future_current     = self.i_dc_future[self.step_count + self.start_idx]   #if epsilon > 0.1 else self.i_dc_future[self.step_count] + 10* np.random.uniform(0, 1)
+        
+        # Updating current values
+        self.input_current      = self.i_dc_estimate[self.step_count+ self.start_idx] 
+        self.future_current     = self.i_dc_future[self.step_count + self.start_idx]   
 
         # Append to history
         self.V_hist.append(V_bat*self.n_batt_seri)                          
@@ -980,7 +979,7 @@ class MyEvalEnv(Env):
         "r_distance"            : self.R_distance,
         "reward"                : self.reward,
         }
-        
+
         return self.state, reward, self.terminated,self.truncated, self.info
 
     def render(self, mode='human'):
