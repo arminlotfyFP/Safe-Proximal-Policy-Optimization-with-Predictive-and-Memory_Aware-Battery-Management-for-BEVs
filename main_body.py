@@ -627,8 +627,8 @@ stop_criteria_PPO = {
 from ray.tune.logger import TBXLogger
 from ray.tune.logger import pretty_print
 from ray.tune.logger import CSVLoggerCallback
- 
-results2 = tune.run(
+
+results1 = tune.run(
     "SAC",
     config=config_dict1,
     stop=stop_criteria,
