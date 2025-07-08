@@ -266,11 +266,15 @@ class MyGymEnv(Env):
         self.battery_SOC    = SOC  
         self.SC_voltage     = V_SC*self.C_n_seri 
 
-
-        # state section
-        epsilon = np.random.uniform(0, 1)
-        self.input_current      = self.i_dc_estimate[self.step_count+ self.start_idx] if epsilon > 0.1 else self.i_dc_estimate[self.step_count] + 10* np.random.uniform(0, 1)
-        self.future_current     = self.i_dc_future[self.step_count + self.start_idx]   if epsilon > 0.1 else self.i_dc_future[self.step_count] + 10* np.random.uniform(0, 1)
+        # Stop conditions section
+        self.truncated = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110 or Q <= 0 or abs(self.battery_current + self.SC_current-self.input_current) >10
+        self.terminated = self.step_count + self.start_idx >= self.end_counter - 1  
+        # Updating counter
+        self.step_count += 1
+        # current section
+        # epsilon = np.random.uniform(0, 1)
+        self.input_current      = self.i_dc_estimate[self.step_count+ self.start_idx] #if epsilon > 0.1 else self.i_dc_estimate[self.step_count] + 10* np.random.uniform(0, 1)
+        self.future_current     = self.i_dc_future[self.step_count + self.start_idx]   #if epsilon > 0.1 else self.i_dc_future[self.step_count] + 10* np.random.uniform(0, 1)
 
         # Append to history
         self.V_hist.append(V_bat*self.n_batt_seri)                 
@@ -282,6 +286,7 @@ class MyGymEnv(Env):
         self.requested_I_hist.append(self.input_current)                    
         self.provided_I_hist.append(self.battery_current + self.SC_current)
 
+        # State signal section
         self.state = np.array([self.input_current/np.max(self.i_dc_estimate),
                                 self.future_current/np.max(self.i_dc_estimate),
                                 self.battery_current/np.max(self.i_dc_estimate),
@@ -290,9 +295,7 @@ class MyGymEnv(Env):
                                 self.battery_SOC,
                                 np.clip(self.SC_voltage/110,0.0,1.0)], dtype=np.float32)
         
-        # Stop conditions section
-        self.truncated = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110 or Q <= 0 or abs(self.battery_current + self.SC_current-self.input_current) >10
-        self.terminated = self.step_count + self.start_idx >= self.end_counter - 1  
+        
         
         
         # Define reward sections:
@@ -337,7 +340,7 @@ class MyGymEnv(Env):
             'provided_I_history'    : self.provided_I_hist,
             'reward_history'        : self.reward,
             }
-        self.step_count += 1
+        
         return self.state, reward, self.terminated,self.truncated, self.info
 
     def render(self, mode='human'):
@@ -884,7 +887,7 @@ class MyEvalEnv(Env):
 
     def step(self, action):
         self.battery_current    = float(np.clip(action[0], self.action_space.low[0], self.action_space.high[0]))
-        self.SC_current         = float(np.clip(self.input_current - self.battery_current, self.action_space.low[0], self.action_space.high[0]))
+        self.SC_current         = float(np.clip((self.input_current - self.battery_current), self.action_space.low[0], self.action_space.high[0]))
         battery_current_cell    = action[0]/self.n_batt_par
         SC_current_cell         = self.SC_current/1 # We don not have parallel SCs in this case  
         
@@ -893,9 +896,15 @@ class MyEvalEnv(Env):
         self.battery_SOC = SOC  
         self.SC_voltage = V_SC*self.C_n_seri 
 
-        # state section
-        self.input_current      = self.i_dc_estimate[self.step_count]   # Not randomely generated here
-        self.future_current     = self.i_dc_future[self.step_count]     # Not randomely generated here
+        # Stop conditions section
+        self.truncated = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110 or Q <= 0 or abs(self.battery_current + self.SC_current-self.input_current) >10
+        self.terminated = self.step_count + self.start_idx >= self.end_counter - 1  
+        # Updating counter
+        self.step_count += 1
+        # current section
+        # epsilon = np.random.uniform(0, 1)
+        self.input_current      = self.i_dc_estimate[self.step_count+ self.start_idx] #if epsilon > 0.1 else self.i_dc_estimate[self.step_count] + 10* np.random.uniform(0, 1)
+        self.future_current     = self.i_dc_future[self.step_count + self.start_idx]   #if epsilon > 0.1 else self.i_dc_future[self.step_count] + 10* np.random.uniform(0, 1)
 
         # Append to history
         self.V_hist.append(V_bat*self.n_batt_seri)                          
@@ -908,7 +917,7 @@ class MyEvalEnv(Env):
         self.provided_I_hist.append(self.battery_current + self.SC_current) 
 
         
-
+        # State signal section
         self.state = np.array([self.input_current/np.max(self.i_dc_estimate),
                                 self.future_current/np.max(self.i_dc_estimate),
                                 self.battery_current/np.max(self.i_dc_estimate),
@@ -971,7 +980,7 @@ class MyEvalEnv(Env):
         "r_distance"            : self.R_distance,
         "reward"                : self.reward,
         }
-        self.step_count += 1
+        
         return self.state, reward, self.terminated,self.truncated, self.info
 
     def render(self, mode='human'):
@@ -1244,6 +1253,7 @@ truncated = False
 total_reward = 0.0
 action_mem = np.empty((0, 1))
 reward = []
+counter = 0
 info_hist_SAC_LSTM = {}
 info_hist_SAC_LSTM[("STD", "r_current", "r_capacity", "r_current_a", "r_distance", "Reward")] = {}
 
@@ -1261,13 +1271,13 @@ info_hist_lowpass = {}
 while not (done or truncated):
     action = algo_SAC_LSTM.compute_single_action(obs, explore=False)
     obs, reward, done, truncated, info = env1.step(action) 
-    # action_mem = np.append(action_mem, [action], axis=0)
-    # total_reward += reward
-    # counter += 1
-    # print(f"Step {i}, \t Reward: {reward:.3f}")
+    action_mem = np.append(action_mem, [action], axis=0)
+    total_reward += reward
+    counter += 1
+    print(f"Step {counter}, \t Reward: {reward:.3f}")
     if done or truncated:
         info_hist_SAC_LSTM = info
-        # print("SOC :", info_hist_SAC_LSTM['battery_SOC'][-1], "\t Done:", done, "\t Truncated:", truncated, "battery_capacity:", info_hist_SAC_LSTM['battery_capacity'][-1])
+        print("SOC :", info_hist_SAC_LSTM['battery_SOC'][-1], "\t Done:", done, "\t Truncated:", truncated, "battery_capacity:", info_hist_SAC_LSTM['battery_capacity'][-1], "SC_voltage:", info_hist_SAC_LSTM['SC_voltage'][-1])
         break
 
 env1.close()
@@ -1307,8 +1317,8 @@ plt.show()
 plt.figure(figsize=(10, 6))
 plt.plot(info_hist_SAC_LSTM['requested_I_history']   , label='requested_I_history'   , color='red')
 plt.plot(info_hist_SAC_LSTM['provided_I_history']    , label='provided_I_history'    , color='green')
-plt.plot(action_mem[:,0]                            , label='batt'                  , color='gold')
-plt.plot(action_mem[:,1]                            , label='SC'                    , color='blue')
+plt.plot(info_hist_SAC_LSTM['battery_I_history']     , label='batt'                  , color='gold')
+plt.plot(info_hist_SAC_LSTM['SC_I_history']          , label='SC'                    , color='blue')
 plt.title('Reward monitoring')
 plt.xlabel('Sample Number')
 plt.ylabel('Amplitude')
