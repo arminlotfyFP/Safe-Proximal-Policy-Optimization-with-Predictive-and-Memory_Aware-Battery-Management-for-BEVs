@@ -157,8 +157,8 @@ class MyGymEnv(Env):
         # self.i_dc_estimate      = self.i_dc_estimate_org[shuffle_indices]
         # self.i_dc_future        = self.i_dc_future_org[shuffle_indices] 
         
-        self.observation_space = spaces.Box(low=np.array([-1.5, -1.5, -1.5, -1.5, 0, 0, 0]), 
-                                            high=np.array([1.5, 1.5, 1.5, 1.5, 1, 1, 1]), 
+        self.observation_space = spaces.Box(low=np.array([-2, -2, -2, -2, 0, 0, 0]), 
+                                            high=np.array([2, 2, 2, 2, 1, 1, 1]), 
                                             shape=(7,), dtype=np.float32
 )
         
@@ -619,7 +619,7 @@ stop_criteria = {
 }
 
 stop_criteria_PPO = {
-    "training_iteration": 500, # Set a high number for iterations
+    "training_iteration": 10000, # Set a high number for iterations
     "episode_reward_mean": -10,    # Stop when mean reward reaches 200
 }
 
@@ -1324,21 +1324,75 @@ plt.grid()
 plt.show() 
 
 
-
-
-# SAC
 obs, info = env2.reset()
 done = False
 truncated = False
 total_reward = 0.0
+action_mem = np.empty((0, 1))
+reward = []
+counter = 0
+
+# SAC
 while not (done or truncated):
-    action = algo_SAC.compute_single_action(obs, explore=False)  # Do NOT overwrite algo.config
-    obs, reward, done, truncated, info = env.step(action)
+    action = algo_SAC.compute_single_action(obs, explore=False)
+    obs, reward, done, truncated, info = env2.step(action) 
+    action_mem = np.append(action_mem, [action], axis=0)
     total_reward += reward
-    if done or truncated or counter ==len(i_dc_estimate):
+    counter += 1
+    print(f"Step {counter}, \t Reward: {reward:.3f}")
+    if done or truncated:
         info_hist_SAC = info
+        print("SOC :", info_hist_SAC['battery_SOC'][-1], "\t Done:", done, "\t Truncated:", truncated, "battery_capacity:", info_hist_SAC['battery_capacity'][-1], "SC_voltage:", info_hist_SAC['SC_voltage'][-1])
         break
+
 env2.close()
+
+# PARAMETERS MONITORING SECTION
+fig, ax = plt.subplots(1, 2, figsize=(10, 6))
+ax[0].plot(info_hist_SAC['battery_SOC']         , label='battery_SOC'         , color='red')
+ax[0].plot(info_hist_SAC['battery_voltage']     , label='battery_voltage'     , color='blue')
+ax[0].plot(info_hist_SAC['SC_voltage']          , label='SC_voltage'          , color='green')
+
+ax[1].plot(info_hist_SAC['battery_capacity']    , label='battery_capacity'    , color='black')
+fig.suptitle("Battery Monitoring Parameters", fontsize=16)
+fig.supxlabel("Sample Number", fontsize=12)
+fig.supylabel("Amplitude", fontsize=12)
+ax[0].legend()
+ax[1].legend()
+ax[0].grid(True)
+ax[1].grid(True)
+plt.show() 
+
+# REWARD SECTION
+plt.figure(figsize=(10, 6))
+plt.plot(info_hist_SAC['STD']                  , label='STD'           , color='red')
+plt.plot(info_hist_SAC['r_current']            , label='r_current'     , color='black')
+plt.plot(info_hist_SAC['r_capacity']           , label='r_capacity'    , color='blue')
+plt.plot(info_hist_SAC['r_current_a']          , label='r_current_a'   , color='green')
+plt.plot(info_hist_SAC['r_distance']           , label='r_distance'    , color='gold')
+plt.title('Reward monitoring')
+# fig.suptitle('Reward monitoring')
+plt.xlabel('Sample Number')
+plt.ylabel('Amplitude')
+plt.legend()
+plt.grid()
+plt.show() 
+
+# ACTION SECTION
+plt.figure(figsize=(10, 6))
+plt.plot(info_hist_SAC['requested_I_history']   , label='requested_I_history'   , color='red')
+plt.plot(info_hist_SAC['provided_I_history']    , label='provided_I_history'    , color='green')
+plt.plot(info_hist_SAC['battery_I_history']     , label='batt'                  , color='gold')
+plt.plot(info_hist_SAC['SC_I_history']          , label='SC'                    , color='blue')
+plt.title('Reward monitoring')
+plt.xlabel('Sample Number')
+plt.ylabel('Amplitude')
+plt.legend()
+plt.grid()
+plt.show() 
+
+
+
 
 # PPO LSTM
 obs, info = env3.reset()
