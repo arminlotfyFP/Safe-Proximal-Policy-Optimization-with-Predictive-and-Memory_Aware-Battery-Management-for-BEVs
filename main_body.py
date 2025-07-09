@@ -313,13 +313,15 @@ class MyGymEnv(Env):
         self.current_buffer.append(self.battery_current)
         r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 2 else 0
         # Distance
-        r_distance = -np.clip(40*(abs(self.end_counter - self.step_count)/self.end_counter), 0, 40)
+        progress = np.clip(self.step_count / self.end_counter, 0.0, 1.0)
+        r_distance = 40 * (progress**2)
+
         # SOC??????????
 
-        reward_temp = r_current + r_capacity + r_current_a + r_std + r_distance
+        reward_temp = r_std + r_current + r_distance #+ r_capacity + r_current_a
 
-        reward = float(np.clip(reward_temp, -1e3, 1e4)) if self.truncated == False else -abs((self.step_count + self.start_idx) - \
-                                                                                                self.end_counter) + reward_temp
+        reward = float(np.clip(reward_temp, -1e3, 1e4)) #if self.truncated == False else -abs((self.step_count + self.start_idx) - \
+                                                                                                #self.end_counter) + reward_temp
         reward = reward + 200 if self.terminated else reward
         self.reward.append(reward)
         assert not np.isnan(self.state).any(), "NaN in observation"
@@ -397,11 +399,11 @@ config_dict1 = {
     "rl_module": {
         "model_config": {
             "use_lstm": True,
-            "lstm_cell_size": 32,
+            "lstm_cell_size": [64, 32],  # LSTM cell size can be a list for multiple layers
             "max_seq_len": 75,
             "lstm_use_prev_action": True,
             "lstm_use_prev_reward": True,
-            "fcnet_hiddens": [32, 16],
+            "fcnet_hiddens": [128, 64, 32],
             "fcnet_activation": "relu",
             "burn_in": 5, # Number of initial steps to ignore before LSTM starts processing
         }
@@ -946,14 +948,15 @@ class MyEvalEnv(Env):
         r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 2 else 0
         self.R_current_a.append(r_current_a)
 
-        r_distance = -np.clip(40*(abs(self.end_counter - self.step_count)/self.end_counter), 0, 40)
+        progress = np.clip(self.step_count / self.end_counter, 0.0, 1.0)
+        r_distance = 40 * (progress**2)
         self.R_distance.append(r_distance)
 
         reward_temp = r_current + r_capacity + r_current_a + r_std + r_distance
 
-        reward = float(np.clip(reward_temp, -1e3, 1e4)) if self.truncated == False else -abs((self.step_count + self.start_idx) - \
-                                                                                                self.end_counter) + r_current + r_capacity +  \
-                                                                                                + r_current_a + r_std -100
+        reward = float(np.clip(reward_temp, -1e3, 1e4)) #if self.truncated == False else -abs((self.step_count + self.start_idx) - \
+                                                                                                #self.end_counter) + r_current + r_capacity +  \
+                                                                                                #+ r_current_a + r_std -100
         reward = reward + 200 if self.terminated else reward
         self.reward.append(reward)
 
