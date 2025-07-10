@@ -373,20 +373,25 @@ register_env("MyCustomEnv", lambda config: MyGymEnv(config))
 config_dict1 = {
     "log_level": "ERROR",
     "framework": "torch",   # <--- change to torch
-    "num_workers": 4,
+    "num_workers": 6,
     "num_gpus": 0,          # Set to 0 if you don't have a GPU
-    "num_envs_per_worker": 2,
-    "actor_lr": 1e-4,
+    "num_envs_per_worker": 3,
+    "actor_lr": 3e-5,
     "critic_lr": 1e-4,
-    "alpha_lr": 5e-5,
+    "alpha_lr": 1e-4,
     "normalize_actions": True,
-    "normalize_observations": False,
+    "normalize_observations": True,
     "clip_rewards": False,
-    "target_entropy": "auto",
+    "target_entropy": -1.0,
     "entropy_coeff": "auto",  # Automatically adjust entropy coefficient
     "explore": True,  # Enable exploration
     "rollout_fragment_length": 75,   # Must be >= max_seq_len
-    "train_batch_size": 1024,         # To hold multiple sequences
+    "train_batch_size": 2048,         # To hold multiple sequences
+    "gradient_clipping": 0.5,
+    "batch_mode": "complete_episodes",
+    "exploration_config": {
+    "type": "StochasticSampling",
+    },
     "logger_config": {
         "type": TBXLogger,  # Ensures TensorBoard logging
     },
@@ -399,13 +404,13 @@ config_dict1 = {
     "rl_module": {
         "model_config": {
             "use_lstm": True,
-            "lstm_cell_size": [64, 32],  # LSTM cell size can be a list for multiple layers
+            "lstm_cell_size": [64],  # LSTM cell size can be a list for multiple layers
             "max_seq_len": 75,
             "lstm_use_prev_action": True,
             "lstm_use_prev_reward": True,
             "fcnet_hiddens": [128, 64, 32],
             "fcnet_activation": "relu",
-            "burn_in": 5, # Number of initial steps to ignore before LSTM starts processing
+            "burn_in": 10, # Number of initial steps to ignore before LSTM starts processing
         }
     }
 }
@@ -443,7 +448,7 @@ config_dict2 = {
             "max_seq_len": 75,
             "lstm_use_prev_action": True,
             "lstm_use_prev_reward": True,
-            "fcnet_hiddens": [32, 16],
+            "fcnet_hiddens": [128, 64, 32],
             "fcnet_activation": "relu",
             "burn_in": 5, # Number of initial steps to ignore before LSTM starts processing
         }
@@ -635,7 +640,7 @@ results1 = tune.run(
     config=config_dict1,
     stop=stop_criteria,
     verbose=1,
-    name="SAC_LSTM-Experiment",
+    name="SAC_LSTM-Experiment_GPT",
     local_dir="~/SAC_LSTM_results",
     checkpoint_at_end=True,                      # Save a checkpoint at the end
     checkpoint_freq=5,                           # Checkpoint every 5 iterations
