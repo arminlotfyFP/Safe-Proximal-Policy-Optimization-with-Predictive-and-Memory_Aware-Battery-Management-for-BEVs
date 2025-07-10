@@ -145,7 +145,7 @@ class ECM_RC_Battery:
 min_current =   np.min(i_dc_estimate)    #########################
 max_current =   np.max(i_dc_estimate)    #########################
 # Define my GymEnvironment:
-# input_current, future_current, battery_current, SC_current, battery_capacity,battery_SOC, SC_voltage
+# input_current, future_current, battery_voltage, battery_capacity,battery_SOC, SC_pack_voltage  6 inputs
 class MyGymEnv(Env):
     def __init__(self, config=None):
         super().__init__()
@@ -157,9 +157,9 @@ class MyGymEnv(Env):
         # self.i_dc_estimate      = self.i_dc_estimate_org[shuffle_indices]
         # self.i_dc_future        = self.i_dc_future_org[shuffle_indices] 
         
-        self.observation_space = spaces.Box(low=np.array([-2, -2, -2, -2, 0, 0, 0]), 
-                                            high=np.array([2, 2, 2, 2, 1, 1, 1]), 
-                                            shape=(7,), dtype=np.float32
+        self.observation_space = spaces.Box(low=np.array([-2, -2, -2, 0, 0, 0]), 
+                                            high=np.array([2, 2, 2, 1, 1, 1]), 
+                                            shape=(6,), dtype=np.float32
 )
         
         self.action_space       = spaces.Box(low=-np.array([min_current]), 
@@ -188,11 +188,12 @@ class MyGymEnv(Env):
 
         # Battery
         self.battery_current    = 0
-        self.battery_capacity   = 3.2 + 0.1 * np.random.uniform(-1, 1)
+        self.battery_capacity   = 3.3 + 0.1 * np.random.uniform(-1, 1)
         self.battery_SOC        = 0.60  + 0.20  * np.random.uniform(-1, 1)
-        self.battery_voltage    = 2.5 + self.battery_SOC  * (3.1 - 2.5)
         self.n_batt_par         = 22
         self.n_batt_seri        = 60
+        self.battery_cell_voltage    = 2.5 + self.battery_SOC  * (4 - 2.5)
+        self.battery_voltage    = self.battery_cell_voltage * self.n_batt_seri
         self.fading_coefficient = 2e-8  # alpha 2 coeff for derivative
         self.R0                 = 0.03
         self.R1                 = 0.04
@@ -200,7 +201,8 @@ class MyGymEnv(Env):
         # SC
         self.C_n_seri           = 7
         self.SC_current         = 0
-        self.SC_voltage         = (np.random.uniform(9,16))
+        self.SC_voltage         = (np.random.uniform(12,16))
+        self.SC_pack_voltage    = self.SC_voltage  * self.C_n_seri 
         self.end_counter        = self.max_steps
         self.SC_C               = 58
         self.R_esr              = 22e-3
@@ -229,9 +231,10 @@ class MyGymEnv(Env):
         self.output_current     = []
 
         self.battery_current    = 0
-        self.battery_capacity   = 3.2 + 0.1 * np.random.uniform(-1, 1)
+        self.battery_capacity   = 3.3 + 0.1 * np.random.uniform(-1, 1)
         self.battery_SOC        = 0.60  + 0.20  * np.random.uniform(-1, 1)
-        self.battery_voltage    = 2.5 + self.battery_SOC  * (3.1 - 2.5)
+        self.battery_cell_voltage    = 2.5 + self.battery_SOC  * (4.0 - 2.5)
+        self.battery_voltage    = self.battery_cell_voltage * self.n_batt_seri
 
         self.buffer.clear()
         self.current_buffer.clear()
@@ -241,6 +244,7 @@ class MyGymEnv(Env):
         self.C_n_seri           = 7
         self.SC_current         = 0
         self.SC_voltage         = (np.random.uniform(12,16))
+        self.SC_pack_voltage    = self.SC_voltage  * self.C_n_seri 
         self.terminated         = False
         self.truncated          = False
         self.info               = {}
@@ -249,8 +253,12 @@ class MyGymEnv(Env):
         self.battery    = ECM_RC_Battery(Q_init=self.battery_capacity, alpha=self.fading_coefficient, R0=self.R0, R1=self.R1, C1=self.C1, dt=self.dt, Vmin=2.5, Vmax=4.0)
         self.sc         = Supercapacitor(C=self.SC_C, R_esr=self.R_esr, V_init=self.SC_voltage , dt=self.dt)
 
-        self.state = np.array([self.input_current/np.max(self.i_dc_estimate), self.future_current/np.max(self.i_dc_estimate), self.battery_current/np.max(self.i_dc_estimate),
-                            self.SC_current/np.max(self.i_dc_estimate), 1, self.battery_SOC, np.clip(self.SC_voltage/16,0.0,1.0)], dtype=np.float32)
+        self.state = np.array([self.input_current/np.max(self.i_dc_estimate),
+                                self.future_current/np.max(self.i_dc_estimate),
+                                self.battery_voltage/240,
+                                1,
+                                self.battery_SOC,
+                                np.clip(self.SC_pack_voltage /112,0.0,1.0)], dtype=np.float32)
         
         self.state = np.clip(self.state, -1e6, 1e6)
         return self.state, {}
@@ -261,13 +269,15 @@ class MyGymEnv(Env):
         battery_current_cell    = self.battery_current/self.n_batt_par
         SC_current_cell         = self.SC_current/1 # We do not have parallel SCs in this case  
         
-        V_bat, SOC, Q, V_RC = self.battery.step(battery_current_cell)
-        V_SC, V_sc          = self.sc.step(SC_current_cell)
-        self.battery_SOC    = SOC  
-        self.SC_voltage     = V_SC*self.C_n_seri 
+        V_bat, SOC, Q, V_RC     = self.battery.step(battery_current_cell)
+        V_SC, V_sc              = self.sc.step(SC_current_cell)
+        self.battery_SOC        = SOC  
+        self.SC_voltage         = V_SC
+        self.SC_pack_voltage    = self.SC_voltage*self.C_n_seri 
+        self.battery_voltage    = V_bat*self.n_batt_seri
 
         # Stop conditions section
-        self.truncated = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110 or Q <= 0 or abs(self.battery_current + self.SC_current-self.input_current) >10
+        self.truncated = self.battery_SOC  <= 0.05 or self.SC_pack_voltage <= 60 or self.SC_pack_voltage >= 112 or Q <= 0 or self.battery_voltage <= 150 or self.battery_voltage >= 240
         self.terminated = self.step_count + self.start_idx >= self.end_counter - 1  
         # Updating counter
         self.step_count += 1
@@ -277,7 +287,7 @@ class MyGymEnv(Env):
         self.future_current     = self.i_dc_future[self.step_count + self.start_idx] if self.step_count+ self.start_idx < self.end_counter else self.i_dc_estimate[-1]  
 
         # Append to history
-        self.V_hist.append(V_bat*self.n_batt_seri)                 
+        self.V_hist.append(self.battery_voltage)                 
         self.SOC_hist.append(SOC*100)                                       
         self.Q_hist.append(Q)                                               
         self.V_SC_hist.append(V_SC*self.C_n_seri)                           
@@ -289,11 +299,10 @@ class MyGymEnv(Env):
         # State signal section
         self.state = np.array([self.input_current/np.max(self.i_dc_estimate),
                                 self.future_current/np.max(self.i_dc_estimate),
-                                self.battery_current/np.max(self.i_dc_estimate),
-                                self.SC_current/np.max(self.i_dc_estimate),
+                                self.battery_voltage/240,
                                 Q/self.battery_capacity,
                                 self.battery_SOC,
-                                np.clip(self.SC_voltage/110,0.0,1.0)], dtype=np.float32)
+                                np.clip(self.SC_pack_voltage/112,0.0,1.0)], dtype=np.float32)
         
         
         
@@ -318,7 +327,7 @@ class MyGymEnv(Env):
 
         # SOC??????????
 
-        reward_temp = r_std + r_current + r_distance #+ r_capacity + r_current_a
+        reward_temp = r_std + r_current + r_distance + r_capacity + r_current_a
 
         reward = float(np.clip(reward_temp, -1e3, 1e4)) #if self.truncated == False else -abs((self.step_count + self.start_idx) - \
                                                                                                 #self.end_counter) + reward_temp
@@ -327,7 +336,7 @@ class MyGymEnv(Env):
         assert not np.isnan(self.state).any(), "NaN in observation"
         assert not np.isnan(reward), "NaN in reward"
         assert np.isfinite(self.state).all(), "Inf in observation"
-        # info section                                  #########################################
+        # info section                                  
         if self.truncated != True and self.terminated != True:
             self.info = {}
         else:
@@ -796,9 +805,9 @@ class MyEvalEnv(Env):
         self.i_dc_future        = config.get("i_dc_future", np.zeros(1000))
         self.max_steps          = config.get("max_steps", 8000)
         
-        self.observation_space = spaces.Box(low=np.array([-1.5, -1.5, -1.5, -1.5, 0, 0, 0]), 
-                                            high=np.array([1.5, 1.5, 1.5, 1.5, 1, 1, 1]), 
-                                            shape=(7,), dtype=np.float32
+        self.observation_space = spaces.Box(low=np.array([-1.5, -1.5, -1.5, 0, 0, 0]), 
+                                            high=np.array([1.5,  1.5,  1.5, 1, 1, 1]), 
+                                            shape=(6,), dtype=np.float32
 )
         
         self.action_space       = spaces.Box(low=-np.array([min_current]), 
@@ -831,11 +840,12 @@ class MyEvalEnv(Env):
         self.reward             = []
         # Battery
         self.battery_current    = 0
-        self.battery_capacity   = 3.2 + 0.1 * np.random.uniform(-1, 1)
+        self.battery_capacity   = 3.3 + 0.1 * np.random.uniform(-1, 1)
         self.battery_SOC        = 0.60  + 0.20  * np.random.uniform(-1, 1)
-        self.battery_voltage    = 2.5 + self.battery_SOC  * (3.1 - 2.5)
         self.n_batt_par         = 22
         self.n_batt_seri        = 60
+        self.battery_cell_voltage    = 2.5 + self.battery_SOC  * (4 - 2.5)
+        self.battery_voltage    = self.battery_cell_voltage * self.n_batt_seri
         self.fading_coefficient = 2e-8  # alpha 2 coeff for derivative
         self.R0                 = 0.03
         self.R1                 = 0.04
@@ -843,7 +853,8 @@ class MyEvalEnv(Env):
         # SC
         self.C_n_seri           = 7
         self.SC_current         = 0
-        self.SC_voltage         = (np.random.uniform(12,16))  ############################################
+        self.SC_voltage         = (np.random.uniform(12,16)) 
+        self.SC_pack_voltage    = self.SC_voltage  * self.C_n_seri  
         self.end_counter        = self.max_steps
         self.SC_C               = 58
         self.R_esr              = 22e-3
@@ -867,9 +878,10 @@ class MyEvalEnv(Env):
         self.output_current     = []
 
         self.battery_current    = 0
-        self.battery_capacity   = 3.2 + 0.1 * np.random.uniform(-1, 1)
+        self.battery_capacity   = 3.3 + 0.1 * np.random.uniform(-1, 1)
         self.battery_SOC        = 0.60  + 0.20  * np.random.uniform(-1, 1)
-        self.battery_voltage    = 2.5 + self.battery_SOC  * (3.1 - 2.5)
+        self.battery_cell_voltage    = 2.5 + self.battery_SOC  * (4.0 - 2.5)
+        self.battery_voltage    = self.battery_cell_voltage * self.n_batt_seri
 
         self.buffer.clear()
         self.current_buffer.clear()
@@ -878,7 +890,8 @@ class MyEvalEnv(Env):
         self.R_esr              = 22e-3
         self.C_n_seri           = 7
         self.SC_current         = 0
-        self.SC_voltage         = (np.random.uniform(9,16))  ############################################
+        self.SC_voltage         = (np.random.uniform(12,16))
+        self.SC_pack_voltage    = self.SC_voltage  * self.C_n_seri   
         self.terminated         = False
         self.truncated          = False
         self.info               = {}
@@ -887,8 +900,12 @@ class MyEvalEnv(Env):
         self.battery    = ECM_RC_Battery(Q_init=self.battery_capacity, alpha=self.fading_coefficient, R0=self.R0, R1=self.R1, C1=self.C1, dt=self.dt, Vmin=2.5, Vmax=4.0)
         self.sc         = Supercapacitor(C=self.SC_C, R_esr=self.R_esr, V_init=self.SC_voltage , dt=self.dt)
 
-        self.state = np.array([self.input_current/np.max(self.i_dc_estimate), self.future_current/np.max(self.i_dc_estimate), self.battery_current/np.max(self.i_dc_estimate),
-                            self.SC_current/np.max(self.i_dc_estimate), 1, self.battery_SOC, np.clip(self.SC_voltage/16,0.0,1.0)], dtype=np.float32) ############################################
+        self.state = np.array([self.input_current/np.max(self.i_dc_estimate),
+                                self.future_current/np.max(self.i_dc_estimate),
+                                self.battery_voltage/240,
+                                1,
+                                self.battery_SOC,
+                                np.clip(self.SC_pack_voltage /112,0.0,1.0)], dtype=np.float32)
         return self.state, {}
 
     def step(self, action):
@@ -897,13 +914,15 @@ class MyEvalEnv(Env):
         battery_current_cell    = action[0]/self.n_batt_par
         SC_current_cell         = self.SC_current/1 # We don not have parallel SCs in this case  
         
-        V_bat, SOC, Q, V_RC = self.battery.step(battery_current_cell)
-        V_SC, V_sc = self.sc.step(SC_current_cell)
-        self.battery_SOC = SOC  
-        self.SC_voltage = V_SC*self.C_n_seri 
+        V_bat, SOC, Q, V_RC     = self.battery.step(battery_current_cell)
+        V_SC, V_sc              = self.sc.step(SC_current_cell)
+        self.battery_SOC        = SOC  
+        self.SC_voltage         = V_SC
+        self.SC_pack_voltage    = self.SC_voltage*self.C_n_seri 
+        self.battery_voltage    = V_bat*self.n_batt_seri 
 
         # Stop conditions section
-        self.truncated = self.battery_SOC  <= 0.05 or self.SC_voltage <= 60 or self.SC_voltage >= 110 or Q <= 0 or abs(self.battery_current + self.SC_current)-abs(self.input_current) >10
+        self.truncated = self.battery_SOC  <= 0.05 or self.SC_pack_voltage <= 60 or self.SC_pack_voltage >= 112 or Q <= 0 or self.battery_voltage <= 150 or self.battery_voltage >= 240
         self.terminated = self.step_count + self.start_idx >= self.end_counter - 1  
         # Updating counter
         self.step_count += 1
@@ -913,7 +932,7 @@ class MyEvalEnv(Env):
         self.future_current     = self.i_dc_future[self.step_count + self.start_idx]   if self.step_count+ self.start_idx < self.end_counter else self.i_dc_estimate[-1]
 
         # Append to history
-        self.V_hist.append(V_bat*self.n_batt_seri)                          
+        self.V_hist.append(self.battery_voltage)                          
         self.SOC_hist.append(SOC*100)                                       
         self.Q_hist.append(Q)                                                
         self.V_SC_hist.append(V_SC*self.C_n_seri)                           
@@ -926,11 +945,10 @@ class MyEvalEnv(Env):
         # State signal section
         self.state = np.array([self.input_current/np.max(self.i_dc_estimate),
                                 self.future_current/np.max(self.i_dc_estimate),
-                                self.battery_current/np.max(self.i_dc_estimate),
-                                self.SC_current/np.max(self.i_dc_estimate),
+                                self.battery_voltage/240,
                                 Q/self.battery_capacity,
                                 self.battery_SOC,
-                                np.clip(self.SC_voltage/110,0.0,1.0)], dtype=np.float32)
+                                np.clip(self.SC_pack_voltage/112,0.0,1.0)], dtype=np.float32)
         
         
         
@@ -957,7 +975,7 @@ class MyEvalEnv(Env):
         r_distance = 40 * (progress**2)
         self.R_distance.append(r_distance)
 
-        reward_temp = r_current + r_capacity + r_current_a + r_std + r_distance
+        reward_temp = r_std + r_current + r_distance + r_capacity + r_current_a
 
         reward = float(np.clip(reward_temp, -1e3, 1e4)) #if self.truncated == False else -abs((self.step_count + self.start_idx) - \
                                                                                                 #self.end_counter) + r_current + r_capacity +  \
@@ -965,7 +983,7 @@ class MyEvalEnv(Env):
         reward = reward + 200 if self.terminated else reward
         self.reward.append(reward)
 
-        # info section                                  #########################################
+        # info section                                  
         # if self.truncated == False and self.terminated == False:
         #     self.info = {}
         # else:
