@@ -44,16 +44,20 @@ plt.legend()
 plt.grid()
 plt.show()
 
-# plt.figure(figsize=(10, 6))
-# plt.plot(i_dc_estimate, label='Original Signal', color='blue')
-# plt.plot(i_dc_future_mean, label='Filtered Signal', color='red')
-# plt.title('Low-pass Filtered Signal')
-# plt.xlabel('Sample Number')
-# plt.ylabel('Amplitude')
-# plt.legend()
-# plt.grid()
-# plt.show()
+# Low pass filter design
+# Define a low-pass Butterworth filter function
 
+def butter_lowpas_filter(i_input, cutoff,fs,order=1):
+    nyq = 0.5 * fs
+    normal_cutoff = cutoff / nyq
+    b, a = butter(order, normal_cutoff, btype='low', analog=False)
+    y = filtfilt(b, a, i_input)
+    return y
+
+filtered_i = butter_lowpas_filter(i_dc_estimate, 0.00637, 1, order=1)
+
+action = np.zeros((len(i_dc_estimate), 1), dtype=np.float32)
+action[:, 0] = filtered_i #output is a numpy array
 
 
 # Define Battery & SC
@@ -162,7 +166,7 @@ class MyGymEnv(Env):
         self.input_current      = self.i_dc_estimate[0] #+ 10* np.random.uniform(-1, 1)
         self.output_current     = []
         self.future_current     = self.i_dc_future[0]   #+ 10* np.random.uniform(-1, 1)
-        
+        self.helper_current     = butter_lowpas_filter(self.i_dc_estimate, 0.00637, 1, order=1)
 
         # Deining Buffers
         self.buffer = deque(maxlen=60)
@@ -319,7 +323,8 @@ class MyGymEnv(Env):
         #Current
         sum_current = self.battery_current + self.SC_current
         self.output_current.append(sum_current)
-        r_current = -abs(sum_current-self.input_current)
+        # r_current = -abs(sum_current-self.input_current) #old version
+        r_current = -10*abs(self.battery_current-self.helper_current[self.step_count-1]) #new version
         #Capacity
         r_capacity = -1000 * abs(self.battery_capacity - Q)
         #Derivative current
