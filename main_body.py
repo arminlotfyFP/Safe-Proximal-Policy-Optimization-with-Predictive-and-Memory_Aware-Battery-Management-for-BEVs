@@ -55,7 +55,7 @@ plt.show()
 # Define Battery & SC
 
 class Supercapacitor:
-    def __init__(self, C=58.0, R_esr=0.01, V_init=16.0, dt=1.0):
+    def __init__(self, C=58.0, R_esr=0.01, V_init=12.0, dt=1.0):
         self.C = C                # Farads
         self.R_esr = R_esr        # Ohms
         self.V_sc = V_init        # Initial voltage (V)
@@ -72,7 +72,7 @@ class Supercapacitor:
 
 
 class ECM_RC_Battery:
-    def __init__(self, Q_init=3.3, alpha=0.0002, R0=30e-3, R1=0.02, C1=2500, dt=1, Vmin=2.5, Vmax=4.2):
+    def __init__(self, Q_init=3.3, alpha=0.0002, R0=30e-3, R1=0.02, C1=2500, dt=1, Vmin=2.5, Vmax=4.2, SOC_init=0.8):
         self.Q_init = Q_init          # Initial capacity (Ah)
         self.alpha = alpha            # Capacity fade rate per cycle
         self.R0 = R0                  # Ohm, series resistance
@@ -86,7 +86,7 @@ class ECM_RC_Battery:
 
         # State variables
         self.Q = Q_init               # Current capacity (Ah)
-        self.SOC = 1.0                # Initial SOC (1.0 = 100%)
+        self.SOC = SOC_init                # Initial SOC (1.0 = 100%)
         self.V_RC = 0                 # Initial RC voltage
         self.cycle_count = 0          # Number of full cycles (for capacity fade)
 
@@ -132,8 +132,8 @@ class ECM_RC_Battery:
 
         return V_bat, self.SOC, self.Q, self.V_RC
 
-min_current =   np.min(i_dc_estimate)    #########################
-max_current =   np.max(i_dc_estimate)    #########################
+min_current =   np.min(i_dc_estimate)    
+max_current =   np.max(i_dc_estimate)    
 # Define my GymEnvironment:
 # input_current, future_current, battery_voltage, battery_capacity,battery_SOC, SC_pack_voltage  6 inputs
 class MyGymEnv(Env):
@@ -204,7 +204,7 @@ class MyGymEnv(Env):
         self.info               = {}
         self.step_count         = 0
         # Defining Models
-        self.battery    = ECM_RC_Battery(Q_init=self.battery_capacity, alpha=self.fading_coefficient, R0=self.R0, R1=self.R1, C1=self.C1, dt=self.dt, Vmin=2.5, Vmax=4.0)
+        self.battery    = ECM_RC_Battery(Q_init=self.battery_capacity, alpha=self.fading_coefficient, R0=self.R0, R1=self.R1, C1=self.C1, dt=self.dt, Vmin=2.5, Vmax=4.0, SOC_init=0.8)
         self.sc         = Supercapacitor(C=self.SC_C, R_esr=self.R_esr, V_init=self.SC_voltage , dt=self.dt)
         
 
@@ -231,10 +231,14 @@ class MyGymEnv(Env):
         self.terminated         = False
         self.truncated          = False
         self.info               = {}
+
+        #Random section
+        self.SOC_init           = np.random.uniform(0.6, 0.8)
+        self.SC_V_init          = 12 + 2 * np.random.uniform(-1, 1) # 16V is the nominal voltage of SCs
         
 
-        self.battery    = ECM_RC_Battery(Q_init=self.battery_capacity, alpha=self.fading_coefficient, R0=self.R0, R1=self.R1, C1=self.C1, dt=self.dt, Vmin=2.5, Vmax=4.0)
-        self.sc         = Supercapacitor(C=self.SC_C, R_esr=self.R_esr, V_init=self.SC_voltage , dt=self.dt)
+        self.battery    = ECM_RC_Battery(Q_init=self.battery_capacity, alpha=self.fading_coefficient, R0=self.R0, R1=self.R1, C1=self.C1, dt=self.dt, Vmin=2.5, Vmax=4.0, SOC_init=self.SOC_init)
+        self.sc         = Supercapacitor(C=self.SC_C, R_esr=self.R_esr, V_init=self.SC_V_init , dt=self.dt)
 
         V_bat, self.SOC, self.Q, self.V_RC      = self.battery.step(0)
         V_out, self.V_sc                        = self.sc.step(0)
@@ -307,7 +311,7 @@ class MyGymEnv(Env):
         
         #STD
         self.buffer.append(self.battery_current)
-        r_std = -abs(np.std(self.buffer))
+        r_std = -10*abs(np.std(self.buffer))
         #Current
         sum_current = self.battery_current + self.SC_current
         self.output_current.append(sum_current)
@@ -319,16 +323,16 @@ class MyGymEnv(Env):
         r_current_a = -10*abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 2 else 0
         # Distance
         progress = np.clip(self.step_count / self.end_counter, 0.0, 1.0)
-        r_distance = 40 * (progress**2)
+        r_distance = 4 * (progress**2)
 
         # counter
         r_counter = 5 + np.log(self.step_count/abs(self.end_counter)) if self.step_count > 0 else 0
 
-        reward_temp = r_std + r_current + r_distance + r_capacity + r_current_a #+ r_counter
+        reward_temp = r_std + r_current + r_distance + r_capacity + r_current_a + r_counter
 
         reward = float(np.clip(reward_temp, -1e3, 1e4)) #if self.truncated == False else -abs((self.step_count + self.start_idx) - \
                                                                                                 #self.end_counter) + reward_temp
-        reward = reward + 200 if self.terminated else reward
+        reward = reward + 200 if self.terminated else reward -100
         self.reward.append(reward)
         assert not np.isnan(self.state).any(), "NaN in observation"
         assert not np.isnan(reward), "NaN in reward"
@@ -382,17 +386,17 @@ config_dict1 = {
     "num_workers": 6,
     "num_gpus": 0,          # Set to 0 if you don't have a GPU
     "num_envs_per_worker": 3,
-    "actor_lr": 3e-5,
-    "critic_lr": 1e-4,
-    "alpha_lr": 1e-4,
+    "actor_lr": 3e-3,
+    "critic_lr": 1e-3,
+    "alpha_lr": 1e-3,
     "normalize_actions": True,
     "normalize_observations": True,
     "clip_rewards": False,
-    "target_entropy": -1.0,
+    "target_entropy": "auto",
     "entropy_coeff": "auto",  # Automatically adjust entropy coefficient
     "explore": True,  # Enable exploration
     "rollout_fragment_length": 75,   # Must be >= max_seq_len
-    "train_batch_size": 2048,         # To hold multiple sequences
+    "train_batch_size": 1024,         # To hold multiple sequences
     "gradient_clipping": 0.5,
     "batch_mode": "complete_episodes",
     "exploration_config": {
@@ -627,7 +631,7 @@ warnings.filterwarnings("ignore")
 
 # --------- TRAINING -----------
 stop_criteria = {
-    "training_iteration": 50, # Set a high number for iterations
+    "training_iteration": 10_000, # Set a high number for iterations
     #"episode_reward_mean": -10,    # Stop when mean reward reaches 200
 }
 
@@ -864,7 +868,7 @@ class MyEvalEnv(Env):
         self.info               = {}
         self.step_count         = 0
         # Defining Models
-        self.battery    = ECM_RC_Battery(Q_init=self.battery_capacity, alpha=self.fading_coefficient, R0=self.R0, R1=self.R1, C1=self.C1, dt=self.dt, Vmin=2.5, Vmax=4.0)
+        self.battery    = ECM_RC_Battery(Q_init=self.battery_capacity, alpha=self.fading_coefficient, R0=self.R0, R1=self.R1, C1=self.C1, dt=self.dt, Vmin=2.5, Vmax=4.0, SOC_init=0.8)
         self.sc         = Supercapacitor(C=self.SC_C, R_esr=self.R_esr, V_init=self.SC_voltage , dt=self.dt)
         
 
@@ -894,8 +898,13 @@ class MyEvalEnv(Env):
         self.step_count         = 0
         self.R_count            = []
 
-        self.battery    = ECM_RC_Battery(Q_init=self.battery_capacity, alpha=self.fading_coefficient, R0=self.R0, R1=self.R1, C1=self.C1, dt=self.dt, Vmin=2.5, Vmax=4.0)
-        self.sc         = Supercapacitor(C=self.SC_C, R_esr=self.R_esr, V_init=self.SC_voltage , dt=self.dt)
+        #Random section
+        self.SOC_init           = np.random.uniform(0.6, 0.8)
+        self.SC_V_init          = 12 + 2 * np.random.uniform(-1, 1) # 16V is the nominal voltage of SCs
+        
+
+        self.battery    = ECM_RC_Battery(Q_init=self.battery_capacity, alpha=self.fading_coefficient, R0=self.R0, R1=self.R1, C1=self.C1, dt=self.dt, Vmin=2.5, Vmax=4.0, SOC_init=self.SOC_init)
+        self.sc         = Supercapacitor(C=self.SC_C, R_esr=self.R_esr, V_init=self.SC_V_init , dt=self.dt)
 
         V_bat, self.SOC, self.Q, self.V_RC      = self.battery.step(0)
         V_out, self.V_sc                        = self.sc.step(0)
@@ -914,8 +923,8 @@ class MyEvalEnv(Env):
                                 np.clip(self.SC_pack_voltage /112,0.0,1.0)], dtype=np.float32)
         return self.state, {}
 
-    def step(self, in_current):
-        self.battery_current    = float(in_current)
+    def step(self, action):
+        self.battery_current    = float(action)
         self.SC_current         = self.input_current - self.battery_current
         battery_current_cell    = self.battery_current/self.n_batt_par
         SC_current_cell         = self.SC_current/1 # We don not have parallel SCs in this case  
@@ -962,7 +971,7 @@ class MyEvalEnv(Env):
         # Define reward sections:
         
         self.buffer.append(self.battery_current)
-        r_std = -abs(np.std(self.buffer))
+        r_std = -10*abs(np.std(self.buffer))
         self.R_std.append(r_std)
 
         sum_current = self.battery_current + self.SC_current
@@ -979,7 +988,7 @@ class MyEvalEnv(Env):
         self.R_current_a.append(r_current_a)
 
         progress = np.clip(self.step_count / self.end_counter, 0.0, 1.0)
-        r_distance = 40 * (progress**2)
+        r_distance = 4 * (progress**2)
         self.R_distance.append(r_distance)
 
         r_counter = 5 + np.log(10* self.step_count/abs(self.end_counter)) if self.step_count > 0 else 0
@@ -1553,19 +1562,27 @@ print("STD:", info_hist_lowpass['STD'][-1],"\n r_current:", info_hist_lowpass['r
 
 # REWARD SECTION
 fig,ax = plt.subplots(2,1,figsize=(10, 6))
-plt.plot(info_hist_lowpass['STD']                  , label='STD'           , color='red')
-plt.plot(info_hist_lowpass['r_current']           , label='r_current'     , color='black')
-plt.plot(info_hist_lowpass['r_capacity']           , label='r_capacity'    , color='blue')
-plt.plot(info_hist_lowpass['r_current_a']          , label='r_current_a'   , color='green')
-plt.plot(info_hist_lowpass['r_distance']           , label='r_distance'    , color='gold')
-plt.plot(info_hist_lowpass['r_counter']           , label='r_counter'    , color='gray')
-# plt.plot(info_hist_lowpass['reward']           , label='reward'    , color='darkorange')
-plt.title('Reward monitoring')
-# fig.suptitle('Reward monitoring')
-plt.xlabel('Sample Number')
-plt.ylabel('Amplitude')
-plt.legend()
-plt.grid()
+ax[0].plot(info_hist_lowpass['STD']                  , label='STD'           , color='red')
+ax[0].plot(info_hist_lowpass['r_current']           , label='r_current'     , color='black')
+ax[0].plot(info_hist_lowpass['r_capacity']           , label='r_capacity'    , color='blue')
+ax[0].plot(info_hist_lowpass['r_current_a']          , label='r_current_a'   , color='green')
+ax[0].plot(info_hist_lowpass['r_distance']           , label='r_distance'    , color='gold')
+ax[0].plot(info_hist_lowpass['r_counter']           , label='r_counter'    , color='gray')
+ax[0].title('Reward monitoring')
+ax[0].suptitle('Reward monitoring')
+ax[0].xlabel('Sample Number')
+ax[0].ylabel('Amplitude')
+ax[0].legend()
+ax[0].grid()
+
+ax[1].plot(info_hist_lowpass['reward']           , label='reward'    , color='darkorange')
+ax[1].title('Reward monitoring')
+ax[1].suptitle('Reward monitoring')
+ax[1].xlabel('Sample Number')
+ax[1].ylabel('Amplitude')
+ax[1].legend()
+ax[1].grid(True)
+
 plt.show() 
 
 # ACTION SECTION
