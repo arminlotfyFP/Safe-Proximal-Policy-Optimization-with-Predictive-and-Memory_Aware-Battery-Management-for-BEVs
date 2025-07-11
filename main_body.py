@@ -19,36 +19,26 @@ os.chdir("/home/armin/Desktop/paper3_python/paper3_py")
 
 # Data preparation:
 data = sio.loadmat('i_dc_estimate.mat')
-data1 = sio.loadmat('I_UDDS.mat')
-i_dc1_estimate = data['i_dc_estimate'].transpose().flatten()
-i_dc2_estimate = data1['I_UDDS'].transpose().flatten()
-i_dc_estimate = np.concatenate((i_dc1_estimate, i_dc2_estimate), axis=0)
+data1 = sio.loadmat('i_dc.mat')
+# i_dc_estimate = data['i_dc_estimate'].transpose().flatten()
+i_dc_estimate = data1['i_dc'].transpose().flatten()
+# i_dc2_estimate = data1['I_UDDS'].transpose().flatten()
+# i_dc_estimate = np.concatenate((i_dc1_estimate, i_dc2_estimate), axis=0)
 i_dc_future = np.roll(i_dc_estimate, -30)
 i_dc_future_mean = np.zeros_like(i_dc_future)
 
 for i in range(len(i_dc_future) - 30):
     i_dc_future_mean[i] = i_dc_future[i:i+30].mean()
 
-# Define a low-pass Butterworth filter function
 
-# def butter_lowpas_filter(i_input, cutoff,fs,order=1):
-#     nyq = 0.5 * fs
-#     normal_cutoff = cutoff / nyq
-#     b, a = butter(order, normal_cutoff, btype='low', analog=False)
-#     y = filtfilt(b, a, i_input)
-#     return y
-
-# filtered_i = butter_lowpas_filter(i_dc_estimate, 0.00637, 1, order=1)
-
-# plt.figure(figsize=(10, 6))
-# plt.plot(i_dc_estimate, label='Original Signal', color='blue')
-# plt.plot(filtered_i, label='Filtered Signal', color='red')
-# plt.title('Low-pass Filtered Signal')
-# plt.xlabel('Sample Number')
-# plt.ylabel('Amplitude')
-# plt.legend()
-# plt.grid()
-# plt.show()
+plt.figure(figsize=(10, 6))
+plt.plot(i_dc_estimate, label='Original Signal', color='blue')
+plt.title('Low-pass Filtered Signal')
+plt.xlabel('Sample Number')
+plt.ylabel('Amplitude')
+plt.legend()
+plt.grid()
+plt.show()
 
 # plt.figure(figsize=(10, 6))
 # plt.plot(i_dc_estimate, label='Original Signal', color='blue')
@@ -65,7 +55,7 @@ for i in range(len(i_dc_future) - 30):
 # Define Battery & SC
 
 class Supercapacitor:
-    def __init__(self, C=500, R_esr=0.01, V_init=2.7, dt=1.0):
+    def __init__(self, C=58.0, R_esr=0.01, V_init=16.0, dt=1.0):
         self.C = C                # Farads
         self.R_esr = R_esr        # Ohms
         self.V_sc = V_init        # Initial voltage (V)
@@ -82,7 +72,7 @@ class Supercapacitor:
 
 
 class ECM_RC_Battery:
-    def __init__(self, Q_init=3.2, alpha=0.0002, R0=0.01, R1=0.02, C1=2500, dt=1, Vmin=2.5, Vmax=4.2):
+    def __init__(self, Q_init=3.3, alpha=0.0002, R0=30e-3, R1=0.02, C1=2500, dt=1, Vmin=2.5, Vmax=4.2):
         self.Q_init = Q_init          # Initial capacity (Ah)
         self.alpha = alpha            # Capacity fade rate per cycle
         self.R0 = R0                  # Ohm, series resistance
@@ -189,7 +179,7 @@ class MyGymEnv(Env):
         # Battery
         self.battery_current    = 0
         self.battery_capacity   = 3.3 + 0.1 * np.random.uniform(-1, 1)
-        self.battery_SOC        = 0.60  + 0.20  * np.random.uniform(-1, 1)
+        self.battery_SOC        = 1.0 #0.60  + 0.20  * np.random.uniform(-1, 1)
         self.n_batt_par         = 22
         self.n_batt_seri        = 60
         self.battery_cell_voltage    = 2.5 + self.battery_SOC  * (4 - 2.5)
@@ -201,7 +191,7 @@ class MyGymEnv(Env):
         # SC
         self.C_n_seri           = 7
         self.SC_current         = 0
-        self.SC_voltage         = (np.random.uniform(12,16))
+        self.SC_voltage         = 16
         self.SC_pack_voltage    = self.SC_voltage  * self.C_n_seri 
         self.end_counter        = self.max_steps
         self.SC_C               = 58
@@ -220,21 +210,15 @@ class MyGymEnv(Env):
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
-
-        # shuffle_indices         = np.random.permutation(len(self.i_dc_estimate))  # ############
-        # self.i_dc_estimate      = self.i_dc_estimate[shuffle_indices]               #######################
-        # self.i_dc_future        = self.i_dc_future[shuffle_indices]             #######################
-
-        self.start_idx          = np.random.randint(0, len(self.i_dc_estimate) - 2000)                   ############
-        self.input_current      = self.i_dc_estimate[self.start_idx] + 10* np.random.uniform(-1, 1) #################
-        self.future_current     = self.i_dc_future[self.start_idx]   + 10* np.random.uniform(-1, 1) #################
+        self.step_count         = 0
+        # self.start_idx          = np.random.randint(0, len(self.i_dc_estimate) - 2000)                   
+        self.input_current      = self.i_dc_estimate[self.step_count] #self.i_dc_estimate[self.start_idx] + 10* np.random.uniform(-1, 1) 
+        self.future_current     = self.i_dc_future[self.step_count] #self.i_dc_future[self.start_idx]   + 10* np.random.uniform(-1, 1) 
         self.output_current     = []
 
         self.battery_current    = 0
         self.battery_capacity   = 3.3 + 0.1 * np.random.uniform(-1, 1)
-        self.battery_SOC        = 0.60  + 0.20  * np.random.uniform(-1, 1)
-        self.battery_cell_voltage    = 2.5 + self.battery_SOC  * (4.0 - 2.5)
-        self.battery_voltage    = self.battery_cell_voltage * self.n_batt_seri
+        
 
         self.buffer.clear()
         self.current_buffer.clear()
@@ -243,19 +227,30 @@ class MyGymEnv(Env):
         self.R_esr              = 22e-3
         self.C_n_seri           = 7
         self.SC_current         = 0
-        self.SC_voltage         = (np.random.uniform(12,16))
-        self.SC_pack_voltage    = self.SC_voltage  * self.C_n_seri 
+        
         self.terminated         = False
         self.truncated          = False
         self.info               = {}
-        self.step_count         = 0
+        
 
         self.battery    = ECM_RC_Battery(Q_init=self.battery_capacity, alpha=self.fading_coefficient, R0=self.R0, R1=self.R1, C1=self.C1, dt=self.dt, Vmin=2.5, Vmax=4.0)
         self.sc         = Supercapacitor(C=self.SC_C, R_esr=self.R_esr, V_init=self.SC_voltage , dt=self.dt)
 
+        V_bat, self.SOC, self.Q, self.V_RC      = self.battery.step(0)
+        V_out, self.V_sc                        = self.sc.step(0)
+
+        self.battery_SOC                        = self.SOC
+        self.battery_cell_voltage               = V_bat
+        self.battery_voltage                    = self.battery_cell_voltage * self.n_batt_seri
+        self.SC_voltage                         = V_out
+        self.SC_pack_voltage                    = self.SC_voltage  * self.C_n_seri 
+
+
+
+
         self.state = np.array([self.input_current/np.max(self.i_dc_estimate),
                                 self.future_current/np.max(self.i_dc_estimate),
-                                self.battery_voltage/240,
+                                self.battery_voltage/252,
                                 1,
                                 self.battery_SOC,
                                 np.clip(self.SC_pack_voltage /112,0.0,1.0)], dtype=np.float32)
@@ -263,8 +258,8 @@ class MyGymEnv(Env):
         self.state = np.clip(self.state, -1e6, 1e6)
         return self.state, {}
 
-    def step(self, action):
-        self.battery_current    = float(np.clip(action[0], self.action_space.low[0], self.action_space.high[0]))
+    def step(self, in_current):
+        self.battery_current    = float(in_current)
         self.SC_current         = self.input_current - self.battery_current
         battery_current_cell    = self.battery_current/self.n_batt_par
         SC_current_cell         = self.SC_current/1 # We do not have parallel SCs in this case  
@@ -276,15 +271,16 @@ class MyGymEnv(Env):
         self.SC_pack_voltage    = self.SC_voltage*self.C_n_seri 
         self.battery_voltage    = V_bat*self.n_batt_seri
 
-        # Stop conditions section
-        self.truncated = self.battery_SOC  <= 0.05 or self.SC_pack_voltage <= 60 or self.SC_pack_voltage >= 112 or Q <= 0 or self.battery_voltage <= 150 or self.battery_voltage >= 240
-        self.terminated = self.step_count + self.start_idx >= self.end_counter - 1  
         # Updating counter
         self.step_count += 1
-        
+
+        # Stop conditions section
+        self.truncated = self.battery_SOC  <= 0.05 or self.SC_pack_voltage <= 60 or self.SC_pack_voltage >= 120 or Q <= 0 or self.battery_voltage <= 150 or self.battery_voltage >= 254 #some extra freedom
+        self.terminated = self.step_count >= self.end_counter - 1  
+                
         # Updating current values
-        self.input_current      = self.i_dc_estimate[self.step_count+ self.start_idx] 
-        self.future_current     = self.i_dc_future[self.step_count + self.start_idx] if self.step_count+ self.start_idx < self.end_counter else self.i_dc_estimate[-1]  
+        self.input_current      = self.i_dc_estimate[self.step_count] 
+        self.future_current     = self.i_dc_future[self.step_count ] if self.step_count < self.end_counter else self.i_dc_estimate[-1]  
 
         # Append to history
         self.V_hist.append(self.battery_voltage)                 
@@ -299,7 +295,7 @@ class MyGymEnv(Env):
         # State signal section
         self.state = np.array([self.input_current/np.max(self.i_dc_estimate),
                                 self.future_current/np.max(self.i_dc_estimate),
-                                self.battery_voltage/240,
+                                self.battery_voltage/252,
                                 Q/self.battery_capacity,
                                 self.battery_SOC,
                                 np.clip(self.SC_pack_voltage/112,0.0,1.0)], dtype=np.float32)
@@ -320,14 +316,15 @@ class MyGymEnv(Env):
         r_capacity = -50 * abs(self.battery_capacity - Q)
         #Derivative current
         self.current_buffer.append(self.battery_current)
-        r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 2 else 0
+        r_current_a = -10*abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 2 else 0
         # Distance
         progress = np.clip(self.step_count / self.end_counter, 0.0, 1.0)
         r_distance = 40 * (progress**2)
 
-        # SOC??????????
+        # counter
+        r_counter = 5 + np.log(self.step_count/abs(self.end_counter)) if self.step_count > 0 else 0
 
-        reward_temp = r_std + r_current + r_distance + r_capacity + r_current_a
+        reward_temp = r_std + r_current + r_distance + r_capacity + r_current_a #+ r_counter
 
         reward = float(np.clip(reward_temp, -1e3, 1e4)) #if self.truncated == False else -abs((self.step_count + self.start_idx) - \
                                                                                                 #self.end_counter) + reward_temp
@@ -630,7 +627,7 @@ warnings.filterwarnings("ignore")
 
 # --------- TRAINING -----------
 stop_criteria = {
-    "training_iteration": 10000, # Set a high number for iterations
+    "training_iteration": 50, # Set a high number for iterations
     #"episode_reward_mean": -10,    # Stop when mean reward reaches 200
 }
 
@@ -838,10 +835,11 @@ class MyEvalEnv(Env):
         self.R_current_a        = []
         self.R_distance         = []
         self.reward             = []
+        self.R_count            = []
         # Battery
         self.battery_current    = 0
         self.battery_capacity   = 3.3 + 0.1 * np.random.uniform(-1, 1)
-        self.battery_SOC        = 0.60  + 0.20  * np.random.uniform(-1, 1)
+        self.battery_SOC        = 1.0 #0.60  + 0.20  * np.random.uniform(-1, 1)
         self.n_batt_par         = 22
         self.n_batt_seri        = 60
         self.battery_cell_voltage    = 2.5 + self.battery_SOC  * (4 - 2.5)
@@ -853,7 +851,7 @@ class MyEvalEnv(Env):
         # SC
         self.C_n_seri           = 7
         self.SC_current         = 0
-        self.SC_voltage         = (np.random.uniform(12,16)) 
+        self.SC_voltage         = 16 #(np.random.uniform(12,16)) 
         self.SC_pack_voltage    = self.SC_voltage  * self.C_n_seri  
         self.end_counter        = self.max_steps
         self.SC_C               = 58
@@ -872,16 +870,15 @@ class MyEvalEnv(Env):
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
-        self.start_idx          = np.random.randint(0, len(self.i_dc_estimate) - 2000)
-        self.input_current      = self.i_dc_estimate[self.start_idx] + 10* np.random.uniform(-1, 1)
-        self.future_current     = self.i_dc_future[self.start_idx]   + 10* np.random.uniform(-1, 1)
+        # self.start_idx          = np.random.randint(0, len(self.i_dc_estimate) - 2000)
+        self.step_count         = 0
+        self.input_current      = self.i_dc_estimate[self.step_count] #+ 10* np.random.uniform(-1, 1)
+        self.future_current     = self.i_dc_future[self.step_count]   #+ 10* np.random.uniform(-1, 1)
         self.output_current     = []
 
         self.battery_current    = 0
         self.battery_capacity   = 3.3 + 0.1 * np.random.uniform(-1, 1)
-        self.battery_SOC        = 0.60  + 0.20  * np.random.uniform(-1, 1)
-        self.battery_cell_voltage    = 2.5 + self.battery_SOC  * (4.0 - 2.5)
-        self.battery_voltage    = self.battery_cell_voltage * self.n_batt_seri
+        
 
         self.buffer.clear()
         self.current_buffer.clear()
@@ -890,28 +887,37 @@ class MyEvalEnv(Env):
         self.R_esr              = 22e-3
         self.C_n_seri           = 7
         self.SC_current         = 0
-        self.SC_voltage         = (np.random.uniform(12,16))
-        self.SC_pack_voltage    = self.SC_voltage  * self.C_n_seri   
+        
         self.terminated         = False
         self.truncated          = False
         self.info               = {}
         self.step_count         = 0
+        self.R_count            = []
 
         self.battery    = ECM_RC_Battery(Q_init=self.battery_capacity, alpha=self.fading_coefficient, R0=self.R0, R1=self.R1, C1=self.C1, dt=self.dt, Vmin=2.5, Vmax=4.0)
         self.sc         = Supercapacitor(C=self.SC_C, R_esr=self.R_esr, V_init=self.SC_voltage , dt=self.dt)
 
+        V_bat, self.SOC, self.Q, self.V_RC      = self.battery.step(0)
+        V_out, self.V_sc                        = self.sc.step(0)
+
+        self.battery_SOC                        = self.SOC
+        self.battery_cell_voltage               = V_bat
+        self.battery_voltage                    = self.battery_cell_voltage * self.n_batt_seri
+        self.SC_voltage                         = V_out
+        self.SC_pack_voltage                    = self.SC_voltage  * self.C_n_seri 
+
         self.state = np.array([self.input_current/np.max(self.i_dc_estimate),
                                 self.future_current/np.max(self.i_dc_estimate),
-                                self.battery_voltage/240,
+                                self.battery_voltage/252,
                                 1,
                                 self.battery_SOC,
                                 np.clip(self.SC_pack_voltage /112,0.0,1.0)], dtype=np.float32)
         return self.state, {}
 
-    def step(self, action):
-        self.battery_current    = float(np.clip(action[0], self.action_space.low[0], self.action_space.high[0]))
+    def step(self, in_current):
+        self.battery_current    = float(in_current)
         self.SC_current         = self.input_current - self.battery_current
-        battery_current_cell    = action[0]/self.n_batt_par
+        battery_current_cell    = self.battery_current/self.n_batt_par
         SC_current_cell         = self.SC_current/1 # We don not have parallel SCs in this case  
         
         V_bat, SOC, Q, V_RC     = self.battery.step(battery_current_cell)
@@ -921,15 +927,16 @@ class MyEvalEnv(Env):
         self.SC_pack_voltage    = self.SC_voltage*self.C_n_seri 
         self.battery_voltage    = V_bat*self.n_batt_seri 
 
-        # Stop conditions section
-        self.truncated = self.battery_SOC  <= 0.05 or self.SC_pack_voltage <= 60 or self.SC_pack_voltage >= 112 or Q <= 0 or self.battery_voltage <= 150 or self.battery_voltage >= 240
-        self.terminated = self.step_count + self.start_idx >= self.end_counter - 1  
         # Updating counter
         self.step_count += 1
-        
+
+        # Stop conditions section
+        self.truncated = self.battery_SOC  <= 0.05 or self.SC_pack_voltage <= 60 or self.SC_pack_voltage >= 120 or Q <= 0 or self.battery_voltage <= 150 or self.battery_voltage >= 254 #some extra freedom
+        self.terminated = self.step_count >= self.end_counter - 1  
+                
         # Updating current values
-        self.input_current      = self.i_dc_estimate[self.step_count+ self.start_idx]  if self.step_count+ self.start_idx < self.end_counter else self.i_dc_estimate[-1]
-        self.future_current     = self.i_dc_future[self.step_count + self.start_idx]   if self.step_count+ self.start_idx < self.end_counter else self.i_dc_estimate[-1]
+        self.input_current      = self.i_dc_estimate[self.step_count] 
+        self.future_current     = self.i_dc_future[self.step_count ] if self.step_count < self.end_counter else self.i_dc_estimate[-1]  
 
         # Append to history
         self.V_hist.append(self.battery_voltage)                          
@@ -945,7 +952,7 @@ class MyEvalEnv(Env):
         # State signal section
         self.state = np.array([self.input_current/np.max(self.i_dc_estimate),
                                 self.future_current/np.max(self.i_dc_estimate),
-                                self.battery_voltage/240,
+                                self.battery_voltage/252,
                                 Q/self.battery_capacity,
                                 self.battery_SOC,
                                 np.clip(self.SC_pack_voltage/112,0.0,1.0)], dtype=np.float32)
@@ -968,14 +975,17 @@ class MyEvalEnv(Env):
         self.R_capacity.append(r_capacity)
 
         self.current_buffer.append(self.battery_current)
-        r_current_a = -abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 2 else 0
+        r_current_a = -10*abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 2 else 0
         self.R_current_a.append(r_current_a)
 
         progress = np.clip(self.step_count / self.end_counter, 0.0, 1.0)
         r_distance = 40 * (progress**2)
         self.R_distance.append(r_distance)
 
-        reward_temp = r_std + r_current + r_distance + r_capacity + r_current_a
+        r_counter = 5 + np.log(10* self.step_count/abs(self.end_counter)) if self.step_count > 0 else 0
+        self.R_count.append(r_counter)
+
+        reward_temp = r_std + r_current + r_distance + r_capacity + r_current_a + r_counter
 
         reward = float(np.clip(reward_temp, -1e3, 1e4)) #if self.truncated == False else -abs((self.step_count + self.start_idx) - \
                                                                                                 #self.end_counter) + r_current + r_capacity +  \
@@ -1001,6 +1011,7 @@ class MyEvalEnv(Env):
         "r_capacity"            : self.R_capacity,
         "r_current_a"           : self.R_current_a,
         "r_distance"            : self.R_distance,
+        "r_counter"             : self.R_count,
         "reward"                : self.reward,
         }
 
@@ -1036,14 +1047,15 @@ def butter_lowpas_filter(i_input, cutoff,fs,order=1):
 
 filtered_i = butter_lowpas_filter(i_dc_estimate, 0.00637, 1, order=1)
 
-action = np.zeros((len(i_dc_estimate), 2), dtype=np.float32)
+action = np.zeros((len(i_dc_estimate), 1), dtype=np.float32)
 action[:, 0] = filtered_i
 # action[:, 1] = i_dc_estimate - filtered_i
+# np.save("action.npy", action[:, 0])
 
 plt.figure(figsize=(10, 6))
 plt.plot(i_dc_estimate, label='Original Signal', color='black')
 plt.plot(action[:, 0], label='Battery Signal', color='blue')
-plt.plot(action[:, 1], label='SC Signal', color='red')
+# plt.plot(action[:, 1], label='SC Signal', color='red')
 plt.title('Low-pass Filtered Signal')
 plt.xlabel('Sample Number')
 plt.ylabel('Amplitude')
@@ -1155,16 +1167,20 @@ plt.grid()
 plt.show()    
 
 ####################################Testing Battery Model ##########################################################
-battery    = ECM_RC_Battery()
+battery    = ECM_RC_Battery(Q_init=3.3, alpha=0.0002, R0=30e-3, R1=0.02, C1=2500, dt=1, Vmin=2.5, Vmax=4.2)
 capacitor = Supercapacitor(C=500, R_esr=0.01, V_init=16, dt=1.0)
 SOC1=[]
 SOC2=[]
+V_battery = []
+V_capacitor = []
 for i in range(len(action)):
-    V_bat, SOC, Q, V_RC = battery.step(action[i,0]/60)
-    # V_out, V_SC = capacitor.step(action[i,1])
-    print(f"\t Step {i+1}: \t SOC: {SOC}, \t Capacity: {Q}")
+    V_bat, SOC, Q, V_RC = battery.step(action[i]/60)
+    V_out, V_SC = capacitor.step(i_dc_estimate[i]-action[i])
+    print(f"\t Step {i+1}: \t SOC: {SOC}, \t Capacity: {Q}, \t V_bat: {V_bat*60}, \t V_SC: {V_SC*7}, current: {action[i,0]}")
     SOC1.append(SOC)
     SOC2.append(Q)
+    V_battery.append(V_bat*60)
+    V_capacitor.append(V_SC*7)    
     if V_bat <= 2:
         print("Battery SOC is too low, stopping simulation.")
         break
@@ -1186,30 +1202,68 @@ for i in range(len(action)):
 #         print("Battery SOC is too low, stopping simulation.")
 #         break
 
-plt.figure(figsize=(10, 6))
-# plt.plot(SOC1           , label='SOC'            , color='gold')
-plt.plot(SOC2           , label='Q'              , color='black')
-plt.title('Low-pass Filtered Signal')
-plt.xlabel('Sample Number')
-plt.ylabel('Amplitude')
-plt.legend()
-plt.grid()
-plt.show()  
+fig, ax = plt.subplots(1, 3, figsize=(10, 6))  # 1 row, 2 columns
+
+# Plot 1
+ax[0].plot(SOC1, label='SOC', color='gold')
+ax[0].plot(SOC2, label='Q', color='black')
+ax[0].set_title('Low-pass Filtered Signal')
+ax[0].set_xlabel('Sample Number')
+ax[0].set_ylabel('Amplitude')
+ax[0].legend()
+ax[0].grid()
+
+# Plot 2
+ax[1].plot(V_battery, label='V_battery', color='gold')
+ax[1].plot(V_capacitor, label='V_capacitor', color='black')
+ax[1].set_title('Low-pass Filtered Signal')
+ax[1].set_xlabel('Sample Number')
+ax[1].set_ylabel('Amplitude')
+ax[1].legend()
+ax[1].grid()
+
+# Plot 3
+ax[2].plot(action[:,0],                     label='I_battery', color='gold')
+ax[2].plot(i_dc_estimate[:]-action[:,0],    label='I_capacitor', color='black')
+ax[2].plot(i_dc_estimate[:],                label='requested', color='blue')
+ax[2].set_title('Low-pass Filtered Signal')
+ax[2].set_xlabel('Sample Number')
+ax[2].set_ylabel('Amplitude')
+ax[2].legend()
+ax[2].grid()
+
+# Show both plots
+plt.tight_layout()
+plt.show()
 
 
 # Effect of ai on Q
 fig, axes = plt.subplots(2, 1, figsize=(8, 6))  # 2 rows, 1 column
 
 x = np.linspace(0, 10, 100)
-axes[0].plot(action[:,0]/60)
+axes[0].plot(action[:,0])
 axes[0].set_title("Current")
 
-axes[1].plot(SOC2)
-axes[1].set_title("Q")
+axes[1].plot(i_dc_estimate)
+axes[1].set_title("requested")
 
 plt.tight_layout()
 plt.show()
 
+
+
+plt.figure(figsize=(10, 5))
+plt.plot(action[:, 0], label='I_battery', color='gold')
+plt.plot(i_dc_estimate[:] - action[:, 0] , label='I_capacitor', color='black')
+plt.plot(i_dc_estimate[:], label='Requested Current', color='blue')
+
+plt.title('Low-pass Filtered Signal')
+plt.xlabel('Sample Number')
+plt.ylabel('Current [A]')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
 
 ################################ testing Algo ( testing and training ENV must be the same) ##################
 from ray.rllib.algorithms.sac import SAC
@@ -1448,17 +1502,17 @@ while not (done or truncated):
         break
 env4.close()
 
-# Low pass filter
-counter=1
-action_mem = np.empty((0, 2))
+######### Low pass filter
+counter=0
+action_mem = np.empty((0, 1), dtype=np.float32)
 for i in range(len(i_dc_estimate)):
 
-    obs, reward, done, truncated, info = env1.step(action[i,:])
-    action_mem = np.append(action_mem, [action[i, :]], axis=0)
+    obs, reward, done, truncated, info = env1.step(float(action[i]))
+    action_mem = np.append(action_mem, float(action[i]))
     total_reward += reward
     counter += 1
     print(f"Step {i+1}, \t Reward: {reward:.3f}")
-    if done or truncated:
+    if done or truncated or counter == len(i_dc_estimate):
         info_hist_lowpass = info
         print("SOC :", info_hist_lowpass['battery_SOC'][-1],
             "\t Done:", done, "\t Truncated:", truncated,
@@ -1498,12 +1552,14 @@ print("STD:", info_hist_lowpass['STD'][-1],"\n r_current:", info_hist_lowpass['r
 
 
 # REWARD SECTION
-plt.figure(figsize=(10, 6))
-# plt.plot(info_hist_lowpass['STD']                  , label='STD'           , color='red')
+fig,ax = plt.subplots(2,1,figsize=(10, 6))
+plt.plot(info_hist_lowpass['STD']                  , label='STD'           , color='red')
 plt.plot(info_hist_lowpass['r_current']           , label='r_current'     , color='black')
-# plt.plot(info_hist_lowpass['r_capacity']           , label='r_capacity'    , color='blue')
-# plt.plot(info_hist_lowpass['r_current_a']          , label='r_current_a'   , color='green')
-# plt.plot(info_hist_lowpass['r_distance']           , label='r_distance'    , color='gold')
+plt.plot(info_hist_lowpass['r_capacity']           , label='r_capacity'    , color='blue')
+plt.plot(info_hist_lowpass['r_current_a']          , label='r_current_a'   , color='green')
+plt.plot(info_hist_lowpass['r_distance']           , label='r_distance'    , color='gold')
+plt.plot(info_hist_lowpass['r_counter']           , label='r_counter'    , color='gray')
+# plt.plot(info_hist_lowpass['reward']           , label='reward'    , color='darkorange')
 plt.title('Reward monitoring')
 # fig.suptitle('Reward monitoring')
 plt.xlabel('Sample Number')
