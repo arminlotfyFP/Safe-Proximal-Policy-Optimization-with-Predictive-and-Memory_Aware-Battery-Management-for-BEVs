@@ -326,13 +326,15 @@ class MyGymEnv(Env):
         r_distance = 4 * (progress**2)
 
         # counter
-        r_counter = 5 + np.log(self.step_count/abs(self.end_counter)) if self.step_count > 0 else 0
+        r_action_repeat = -np.var(self.current_buffer)
 
-        reward_temp = r_std + r_current + r_distance + r_capacity + r_current_a + r_counter
+
+        reward_temp = r_current + r_distance + r_capacity + r_current_a #+ r_action_repeat
 
         reward = float(np.clip(reward_temp, -1e3, 1e4)) #if self.truncated == False else -abs((self.step_count + self.start_idx) - \
                                                                                                 #self.end_counter) + reward_temp
-        reward = reward + 200 if self.terminated else reward -100
+        reward += 50 if not self.truncated else -50
+
         self.reward.append(reward)
         assert not np.isnan(self.state).any(), "NaN in observation"
         assert not np.isnan(reward), "NaN in reward"
@@ -383,25 +385,20 @@ register_env("MyCustomEnv", lambda config: MyGymEnv(config))
 config_dict1 = {
     "log_level": "ERROR",
     "framework": "torch",   # <--- change to torch
-    "num_workers": 6,
+    "num_workers": 8,
     "num_gpus": 0,          # Set to 0 if you don't have a GPU
-    "num_envs_per_worker": 3,
-    "actor_lr": 3e-3,
-    "critic_lr": 1e-3,
-    "alpha_lr": 1e-3,
+    "num_envs_per_worker": 2,
+    "actor_lr": 1e-4,
+    "critic_lr": 1e-4,
+    "alpha_lr": 5e-5,
     "normalize_actions": True,
-    "normalize_observations": True,
+    "normalize_observations": False,
     "clip_rewards": False,
     "target_entropy": "auto",
     "entropy_coeff": "auto",  # Automatically adjust entropy coefficient
-    "explore": True,  # Enable exploration
+    "explore": False,  # Enable exploration
     "rollout_fragment_length": 75,   # Must be >= max_seq_len
     "train_batch_size": 1024,         # To hold multiple sequences
-    "gradient_clipping": 0.5,
-    "batch_mode": "complete_episodes",
-    "exploration_config": {
-    "type": "StochasticSampling",
-    },
     "logger_config": {
         "type": TBXLogger,  # Ensures TensorBoard logging
     },
@@ -413,14 +410,14 @@ config_dict1 = {
     },
     "rl_module": {
         "model_config": {
-            "use_lstm": True,
-            "lstm_cell_size": [64],  # LSTM cell size can be a list for multiple layers
+            "use_lstm": False,
+            "lstm_cell_size": [64,64],
             "max_seq_len": 75,
             "lstm_use_prev_action": True,
             "lstm_use_prev_reward": True,
-            "fcnet_hiddens": [128, 64, 32],
+            "fcnet_hiddens": [128, 128,64, 32],
             "fcnet_activation": "relu",
-            "burn_in": 10, # Number of initial steps to ignore before LSTM starts processing
+            "burn_in": 5, # Number of initial steps to ignore before LSTM starts processing
         }
     }
 }
@@ -650,7 +647,7 @@ results1 = tune.run(
     config=config_dict1,
     stop=stop_criteria,
     verbose=1,
-    name="SAC_LSTM-Experiment_GPT",
+    name="SAC_LSTM-Experiment",
     local_dir="~/SAC_LSTM_results",
     checkpoint_at_end=True,                      # Save a checkpoint at the end
     checkpoint_freq=5,                           # Checkpoint every 5 iterations
