@@ -24,8 +24,10 @@ data1 = sio.loadmat('i_dc.mat')
 # i_dc_estimate = data['i_dc_estimate'].transpose().flatten() # with this I must change SC and batter params
 # with resolution of 1
 temp = data1['i_dc'].transpose().flatten()
-i_dc_estimate=[]
+i_dc_estimate = []
 i_dc_estimate.extend(temp[::10])
+i_dc_estimate = np.array(i_dc_estimate, dtype=np.float32)
+
 
 
 i_dc_future = np.roll(i_dc_estimate, -30)
@@ -140,8 +142,8 @@ class ECM_RC_Battery:
 
         return V_bat, self.SOC, self.Q, self.V_RC
 
-min_current =   np.min(i_dc_estimate)    
-max_current =   np.max(i_dc_estimate)    
+min_current =  0 #np.min(i_dc_estimate)    
+max_current =  100 #np.max(i_dc_estimate)    
 # Define my GymEnvironment:
 # input_current, future_current, battery_voltage, battery_capacity,battery_SOC, SC_pack_voltage  6 inputs
 class MyGymEnv(Env):
@@ -338,11 +340,20 @@ class MyGymEnv(Env):
         r_action_repeat = -np.var(self.current_buffer)
 
 
-        reward_temp = r_current + r_distance + r_capacity + r_current_a
+        # reward_temp = r_current + r_distance + r_capacity + r_current_a
 
-        reward = float(np.clip(reward_temp, -1e3, 1e4)) #if self.truncated == False else -abs((self.step_count + self.start_idx) - \
+        # reward = float(np.clip(reward_temp, -1e3, 1e4)) #if self.truncated == False else -abs((self.step_count + self.start_idx) - \
                                                                                                 #self.end_counter) + reward_temp
-        reward += 10 if not self.truncated else -100
+        # reward += 10 if not self.truncated else -100
+        # new reward function
+        reward = 0.0
+        if self.truncated :
+            reward -= 1000
+        reward += self.step_count / self.end_counter # Reward for progress
+        if self.terminated:
+            reward += 200
+        
+        
 
         self.reward.append(reward)
         assert not np.isnan(self.state).any(), "NaN in observation"
@@ -421,11 +432,11 @@ config_dict1 = {
     "rl_module": {
         "model_config": {
             "use_lstm": False,
-            "lstm_cell_size": [128,128,64],
+            "lstm_cell_size": [128,64],
             "max_seq_len": 75,
             "lstm_use_prev_action": True,
             "lstm_use_prev_reward": True,
-            "fcnet_hiddens": [128, 128,64, 32],
+            "fcnet_hiddens": [128,64, 32],
             "fcnet_activation": "relu",
             "burn_in": 5, # Number of initial steps to ignore before LSTM starts processing
         }
@@ -638,7 +649,7 @@ warnings.filterwarnings("ignore")
 
 # --------- TRAINING -----------
 stop_criteria = {
-    "training_iteration": 10_000, # Set a high number for iterations
+    "training_iteration": 10000, # Set a high number for iterations
     #"episode_reward_mean": -10,    # Stop when mean reward reaches 200
 }
 
@@ -1192,7 +1203,7 @@ SOC2=[]
 V_battery = []
 V_capacitor = []
 for i in range(len(action)):
-    V_bat, SOC, Q, V_RC = battery.step(action[i]/60)
+    V_bat, SOC, Q, V_RC = battery.step(action[i]/22.0)
     V_out, V_SC = capacitor.step(i_dc_estimate[i]-action[i])
     print(f"\t Step {i+1}: \t SOC: {SOC}, \t Capacity: {Q}, \t V_bat: {V_bat*60}, \t V_SC: {V_SC*7}, current: {action[i,0]}")
     SOC1.append(SOC)
