@@ -323,8 +323,8 @@ class MyGymEnv(Env):
         #Current
         sum_current = self.battery_current + self.SC_current
         self.output_current.append(sum_current)
-        # r_current = -abs(sum_current-self.input_current) #old version
-        r_current = -10*abs(self.battery_current-self.helper_current[self.step_count-1]) #new version
+        r_current = -10*abs(sum_current-self.input_current) #old version
+        # r_current = -10*abs(self.battery_current-self.helper_current[self.step_count-1]) #new version
         #Capacity
         r_capacity = -1000 * abs(self.battery_capacity - Q)
         #Derivative current
@@ -394,12 +394,13 @@ register_env("MyCustomEnv", lambda config: MyGymEnv(config))
 config_dict1 = {
     "log_level": "ERROR",
     "framework": "torch",   # <--- change to torch
-    "num_workers": 8,
+    "num_workers": 4,
     "num_gpus": 0,          # Set to 0 if you don't have a GPU
-    "num_envs_per_worker": 2,
-    "actor_lr": 1e-4,
-    "critic_lr": 1e-4,
-    "alpha_lr": 5e-5,
+    "num_envs_per_worker": 5,
+    "actor_lr": 1e-3,
+    "critic_lr": 1e-3,
+    "alpha_lr": 1e-3,
+    "gamma": 0.90,  # Discount factor
     "normalize_actions": True,
     "normalize_observations": False,
     "clip_rewards": False,
@@ -420,7 +421,7 @@ config_dict1 = {
     "rl_module": {
         "model_config": {
             "use_lstm": False,
-            "lstm_cell_size": [64,64],
+            "lstm_cell_size": [128,128,64],
             "max_seq_len": 75,
             "lstm_use_prev_action": True,
             "lstm_use_prev_reward": True,
@@ -659,7 +660,7 @@ results1 = tune.run(
     name="SAC_LSTM-Experiment",
     local_dir="~/SAC_LSTM_results",
     checkpoint_at_end=True,                      # Save a checkpoint at the end
-    checkpoint_freq=5,                           # Checkpoint every 5 iterations
+    checkpoint_freq=500,                           # Checkpoint every 5 iterations
     keep_checkpoints_num=3,                      # Keep only top 3
     checkpoint_score_attr="episode_reward_mean", # Use max episode return for ranking
     log_to_file=True,  
@@ -823,7 +824,7 @@ class MyEvalEnv(Env):
         self.input_current      = self.i_dc_estimate[0] #+ 10* np.random.uniform(-1, 1)
         self.output_current     = []
         self.future_current     = self.i_dc_future[0]   #+ 10* np.random.uniform(-1, 1)
-        
+        self.helper_current     = butter_lowpas_filter(self.i_dc_estimate, 0.00637, 1, order=1)
 
         # Deining Buffers
         self.buffer = deque(maxlen=60)
@@ -984,6 +985,8 @@ class MyEvalEnv(Env):
         self.output_current.append(sum_current)
 
         r_current = -abs(sum_current-self.input_current)
+        # r_current = -10*abs(self.battery_current-self.helper_current[self.step_count-1]) #new version
+
         self.R_current.append(r_current)
 
         r_capacity = -1000 * abs(self.battery_capacity - Q)
@@ -1392,11 +1395,11 @@ plt.show()
 
 # REWARD SECTION
 plt.figure(figsize=(10, 6))
-plt.plot(info_hist_SAC_LSTM['STD']                  , label='STD'           , color='red')
+# plt.plot(info_hist_SAC_LSTM['STD']                  , label='STD'           , color='red')
 plt.plot(info_hist_SAC_LSTM['r_current']            , label='r_current'     , color='black')
 plt.plot(info_hist_SAC_LSTM['r_capacity']           , label='r_capacity'    , color='blue')
 plt.plot(info_hist_SAC_LSTM['r_current_a']          , label='r_current_a'   , color='green')
-plt.plot(info_hist_SAC_LSTM['r_distance']           , label='r_distance'    , color='gold')
+# plt.plot(info_hist_SAC_LSTM['r_distance']           , label='r_distance'    , color='gold')
 plt.title('Reward monitoring')
 # fig.suptitle('Reward monitoring')
 plt.xlabel('Sample Number')
