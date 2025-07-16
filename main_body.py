@@ -172,7 +172,7 @@ class MyGymEnv(Env):
 
         # Deining Buffers
         self.buffer = deque(maxlen=3)
-        self.current_buffer = deque(maxlen=10)
+        self.current_buffer = deque(maxlen=3)
 
         # History
         self.dt                 = 1
@@ -185,7 +185,7 @@ class MyGymEnv(Env):
         self.requested_I_hist   = []
         self.provided_I_hist    = []
         self.reward             = []
-
+        self.R_std             = []
         # Battery
         self.battery_current    = 0
         self.battery_capacity   = 3.3 + 0.1 * np.random.uniform(-1, 1)
@@ -319,61 +319,47 @@ class MyGymEnv(Env):
         
         # Define reward sections:
         
-        #STD
-        self.buffer.append(self.battery_current)
-        r_std = -10*abs(np.std(self.buffer))
         #Current
         sum_current = self.battery_current + self.SC_current
         self.output_current.append(sum_current)
-        r_current = -10*abs(sum_current-self.input_current) #old version
-        # r_current = -10*abs(self.battery_current-self.helper_current[self.step_count-1]) #new version
+        r_current = -10*abs(sum_current-self.input_current) 
+
         #Capacity
         r_capacity = -1000 * abs(self.battery_capacity - Q)
+
         #Derivative current
         self.current_buffer.append(self.battery_current)
         r_current_a = -50*abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 2 else 0
-        # Distance
-        progress = np.clip(self.step_count / self.end_counter, 0.0, 1.0)
-        r_distance = 100 * (progress**2)
 
-        # counter
-        r_action_repeat = -np.var(self.current_buffer)
-
-
-        # reward_temp = r_current + r_distance + r_capacity + r_current_a
-
-        # reward = float(np.clip(reward_temp, -1e3, 1e4)) #if self.truncated == False else -abs((self.step_count + self.start_idx) - \
-                                                                                                #self.end_counter) + reward_temp
-        # reward += 10 if not self.truncated else -100
-        # new reward function
-        reward = 10*r_current_a
+        reward = r_current_a
         if self.truncated :
             reward -= 1000
         reward += 10*(self.step_count / self.end_counter) # Reward for progress
         if self.terminated:
             reward += 200
-        
-        
+        reward_cc = np.clip(10 * -((abs(self.battery_current) - abs(self.SC_current))/ (sum_current +0.1)),-1000,1) # Reward for balancing the current
+        self.R_std.append(reward_cc)
+        reward +=reward_cc
 
         self.reward.append(reward)
         assert not np.isnan(self.state).any(), "NaN in observation"
         assert not np.isnan(reward), "NaN in reward"
         assert np.isfinite(self.state).all(), "Inf in observation"
         # info section                                  
-        if self.truncated != True and self.terminated != True:
-            self.info = {}
-        else:
+        if self.truncated or self.terminated:
             self.info = {
-            'battery_voltage'       : self.V_hist,
-            'battery_SOC'           : self.SOC_hist,
-            'battery_capacity'      : self.Q_hist,
-            'SC_voltage'            : self.V_SC_hist,
-            'battery_I_history'     : self.battery_I_hist,
-            'SC_I_history'          : self.SC_I_hist,
-            'requested_I_history'   : self.requested_I_hist,
-            'provided_I_history'    : self.provided_I_hist,
-            'reward_history'        : self.reward,
+                'battery_voltage'       : self.V_hist,
+                'battery_SOC'           : self.SOC_hist,
+                'battery_capacity'      : self.Q_hist,
+                'SC_voltage'            : self.V_SC_hist,
+                'battery_I_history'     : self.battery_I_hist,
+                'SC_I_history'          : self.SC_I_hist,
+                'requested_I_history'   : self.requested_I_hist,
+                'provided_I_history'    : self.provided_I_hist,
+                'reward_history'        : self.reward,
             }
+        else:
+            self.info = {}
         
         return self.state, reward, self.terminated,self.truncated, self.info
 
@@ -649,12 +635,12 @@ warnings.filterwarnings("ignore")
 
 # --------- TRAINING -----------
 stop_criteria = {
-    "training_iteration": 10_000, # Set a high number for iterations
+    "training_iteration": 5_000, # Set a high number for iterations
     "episode_reward_mean": -10,    # Stop when mean reward reaches 200
 }
 
 stop_criteria_PPO = {
-    "training_iteration": 10_000, # Set a high number for iterations
+    "training_iteration": 5_000, # Set a high number for iterations
     # "episode_reward_mean": -10,    # Stop when mean reward reaches 200
 }
 
@@ -678,9 +664,9 @@ results1 = tune.run(
     callbacks=[CSVLoggerCallback()] 
 )
 
-
+# best configuration
 # best_trial_SAC_LSTM = results1.get_best_trial(metric="episode_reward_mean", mode="max")
-
+# Best weights
 # best_checkpoint_SAC_LSTM = results1.get_best_checkpoint(
 #     best_trial_SAC_LSTM,
 #     metric="episode_reward_mean",
@@ -1047,13 +1033,17 @@ class MyEvalEnv(Env):
         #                                                                                         #+ r_current_a + r_std -100
         # reward += 10 if not self.truncated else -100
         
-        reward = 10*r_current_a
+        reward = r_current_a
         if self.truncated :
             reward -= 1000
         reward += 10*(self.step_count / self.end_counter) # Reward for progress
         if self.terminated:
             reward += 200
-        
+        reward_cc = np.clip(10 * -((abs(self.battery_current) - abs(self.SC_current))/ (sum_current +0.1)),-1000,1) # Reward for balancing the current
+        self.R_std.append(reward_cc)
+        reward +=reward_cc
+
+
         self.reward.append(reward)
         # info section                                  
         # if self.truncated == False and self.terminated == False:
@@ -1068,7 +1058,7 @@ class MyEvalEnv(Env):
         'SC_I_history'          : self.SC_I_hist,
         'requested_I_history'   : self.requested_I_hist,
         'provided_I_history'    : self.provided_I_hist,
-        "STD"                   : self.R_std,
+        "balancer"                   : self.R_std,
         "r_current"             : self.R_current,
         "r_capacity"            : self.R_capacity,
         "r_current_a"           : self.R_current_a,
@@ -1398,7 +1388,7 @@ eval_config4["env_config"] = {
 
 
 # Instantiate the environment manually (for step-by-step evaluation)
-env1 = MyEvalEnv(eval_config1["env_config"])
+env1 = MyGymEnv(eval_config1["env_config"])
 env2 = MyEvalEnv(eval_config2["env_config"])
 env3 = MyEvalEnv(eval_config3["env_config"])
 env4 = MyEvalEnv(eval_config4["env_config"])
@@ -1457,7 +1447,7 @@ plt.close('all')
 
 # REWARD SECTION
 plt.figure(figsize=(10, 6))
-# plt.plot(info_hist_SAC_LSTM['STD']                  , label='STD'           , color='red')
+plt.plot(info_hist_SAC_LSTM['balancer']                  , label='balancer'           , color='red')
 # plt.plot(info_hist_SAC_LSTM['r_current']            , label='r_current'     , color='black')
 plt.plot(info_hist_SAC_LSTM['r_capacity']           , label='r_capacity'    , color='blue')
 plt.plot(info_hist_SAC_LSTM['r_current_a']          , label='r_current_a'   , color='green')
