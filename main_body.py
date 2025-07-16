@@ -171,7 +171,7 @@ class MyGymEnv(Env):
         self.helper_current     = butter_lowpas_filter(self.i_dc_estimate, 0.00637, 1, order=1)
 
         # Deining Buffers
-        self.buffer = deque(maxlen=60)
+        self.buffer = deque(maxlen=3)
         self.current_buffer = deque(maxlen=10)
 
         # History
@@ -221,9 +221,9 @@ class MyGymEnv(Env):
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         self.step_count         = 0
-        # self.start_idx          = np.random.randint(0, len(self.i_dc_estimate) - 2000)                   
-        self.input_current      = self.i_dc_estimate[self.step_count] #self.i_dc_estimate[self.start_idx] + 10* np.random.uniform(-1, 1) 
-        self.future_current     = self.i_dc_future[self.step_count] #self.i_dc_future[self.start_idx]   + 10* np.random.uniform(-1, 1) 
+        #self.start_idx          = np.random.randint(0, len(self.i_dc_estimate) - 500)                   
+        self.input_current      = self.i_dc_estimate[self.step_count ] #self.i_dc_estimate[self.start_idx] + 10* np.random.uniform(-1, 1) 
+        self.future_current     = self.i_dc_future[self.step_count ] #self.i_dc_future[self.start_idx]   + 10* np.random.uniform(-1, 1) 
         self.output_current     = []
 
         self.battery_current    = 0
@@ -293,7 +293,7 @@ class MyGymEnv(Env):
         self.terminated = self.step_count >= self.end_counter - 1  
                 
         # Updating current values
-        self.input_current      = self.i_dc_estimate[self.step_count] 
+        self.input_current      = self.i_dc_estimate[self.step_count ] 
         self.future_current     = self.i_dc_future[self.step_count ] if self.step_count < self.end_counter else self.i_dc_estimate[-1]  
 
         # Append to history
@@ -346,10 +346,10 @@ class MyGymEnv(Env):
                                                                                                 #self.end_counter) + reward_temp
         # reward += 10 if not self.truncated else -100
         # new reward function
-        reward = 0.0
+        reward = 10*r_current_a
         if self.truncated :
             reward -= 1000
-        reward += self.step_count / self.end_counter # Reward for progress
+        reward += 10*(self.step_count / self.end_counter) # Reward for progress
         if self.terminated:
             reward += 200
         
@@ -405,7 +405,7 @@ register_env("MyCustomEnv", lambda config: MyGymEnv(config))
 config_dict1 = {
     "log_level": "ERROR",
     "framework": "torch",   # <--- change to torch
-    "num_workers": 4,
+    "num_workers": 10,
     "num_gpus": 0,          # Set to 0 if you don't have a GPU
     "num_envs_per_worker": 5,
     "actor_lr": 1e-3,
@@ -413,11 +413,51 @@ config_dict1 = {
     "alpha_lr": 1e-3,
     "gamma": 0.90,  # Discount factor
     "normalize_actions": True,
-    "normalize_observations": False,
+    "normalize_observations": True,
     "clip_rewards": False,
     "target_entropy": "auto",
     "entropy_coeff": "auto",  # Automatically adjust entropy coefficient
-    "explore": False,  # Enable exploration
+    "explore": True,  # Enable exploration
+    "rollout_fragment_length": 75,   # Must be >= max_seq_len
+    "train_batch_size": 1024,         # To hold multiple sequences
+    "logger_config": {
+        "type": TBXLogger,  # Ensures TensorBoard logging
+    },
+    "env": "MyCustomEnv",
+    "env_config": {
+        "i_dc_estimate": i_dc_estimate,   # these should be defined in your script!
+        "i_dc_future": i_dc_future,
+        "max_steps": len(i_dc_estimate),  # or any other per-episode limit you want
+    },
+    "rl_module": {
+        "model_config": {
+            "use_lstm": True,
+            "lstm_cell_size": [128,64],
+            "max_seq_len": 75,
+            "lstm_use_prev_action": True,
+            "lstm_use_prev_reward": True,
+            "fcnet_hiddens": [128,64, 32],
+            "fcnet_activation": "relu",
+            "burn_in": 5, # Number of initial steps to ignore before LSTM starts processing
+        }
+    }
+}
+
+config_dict2 = {
+    "log_level": "ERROR",
+    "framework": "torch",   # <--- change to torch
+    "num_workers": 10,
+    "num_gpus": 0,          # Set to 0 if you don't have a GPU
+    "num_envs_per_worker": 5,
+    "actor_lr": 1e-3,
+    "critic_lr": 1e-3,
+    "alpha_lr": 1e-3,
+    "normalize_actions": True,
+    "normalize_observations": True,
+    "clip_rewards": False,
+    "target_entropy": "auto",
+    "entropy_coeff": "auto",  # Automatically adjust entropy coefficient
+    "explore": True,  # Enable exploration
     "rollout_fragment_length": 75,   # Must be >= max_seq_len
     "train_batch_size": 1024,         # To hold multiple sequences
     "logger_config": {
@@ -433,46 +473,6 @@ config_dict1 = {
         "model_config": {
             "use_lstm": False,
             "lstm_cell_size": [128,64],
-            "max_seq_len": 75,
-            "lstm_use_prev_action": True,
-            "lstm_use_prev_reward": True,
-            "fcnet_hiddens": [128,64, 32],
-            "fcnet_activation": "relu",
-            "burn_in": 5, # Number of initial steps to ignore before LSTM starts processing
-        }
-    }
-}
-
-config_dict2 = {
-    "log_level": "ERROR",
-    "framework": "torch",   # <--- change to torch
-    "num_workers": 4,
-    "num_gpus": 0,          # Set to 0 if you don't have a GPU
-    "num_envs_per_worker": 2,
-    "actor_lr": 1e-4,
-    "critic_lr": 1e-4,
-    "alpha_lr": 5e-5,
-    "normalize_actions": True,
-    "normalize_observations": False,
-    "clip_rewards": False,
-    "target_entropy": "auto",
-    "entropy_coeff": "auto",  # Automatically adjust entropy coefficient
-    "explore": False,  # Enable exploration
-    "rollout_fragment_length": 75,   # Must be >= max_seq_len
-    "train_batch_size": 1024,         # To hold multiple sequences
-    "logger_config": {
-        "type": TBXLogger,  # Ensures TensorBoard logging
-    },
-    "env": "MyCustomEnv",
-    "env_config": {
-        "i_dc_estimate": i_dc_estimate,   # these should be defined in your script!
-        "i_dc_future": i_dc_future,
-        "max_steps": len(i_dc_estimate),  # or any other per-episode limit you want
-    },
-    "rl_module": {
-        "model_config": {
-            "use_lstm": False,
-            "lstm_cell_size": 32,
             "max_seq_len": 75,
             "lstm_use_prev_action": True,
             "lstm_use_prev_reward": True,
@@ -649,13 +649,13 @@ warnings.filterwarnings("ignore")
 
 # --------- TRAINING -----------
 stop_criteria = {
-    "training_iteration": 10000, # Set a high number for iterations
-    #"episode_reward_mean": -10,    # Stop when mean reward reaches 200
+    "training_iteration": 10_000, # Set a high number for iterations
+    "episode_reward_mean": -10,    # Stop when mean reward reaches 200
 }
 
 stop_criteria_PPO = {
-    "training_iteration": 10000, # Set a high number for iterations
-    "episode_reward_mean": -10,    # Stop when mean reward reaches 200
+    "training_iteration": 10_000, # Set a high number for iterations
+    # "episode_reward_mean": -10,    # Stop when mean reward reaches 200
 }
 
 
@@ -668,8 +668,8 @@ results1 = tune.run(
     config=config_dict1,
     stop=stop_criteria,
     verbose=1,
-    name="SAC_LSTM-Experiment",
-    local_dir="~/SAC_LSTM_results",
+    name="SAC-LSTM-Experimente-FINAL",
+    local_dir="~/SAC_results",
     checkpoint_at_end=True,                      # Save a checkpoint at the end
     checkpoint_freq=500,                           # Checkpoint every 5 iterations
     keep_checkpoints_num=3,                      # Keep only top 3
@@ -678,6 +678,31 @@ results1 = tune.run(
     callbacks=[CSVLoggerCallback()] 
 )
 
+
+# best_trial_SAC_LSTM = results1.get_best_trial(metric="episode_reward_mean", mode="max")
+
+# best_checkpoint_SAC_LSTM = results1.get_best_checkpoint(
+#     best_trial_SAC_LSTM,
+#     metric="episode_reward_mean",
+#     mode="max"
+# )
+# restore_path = best_checkpoint_SAC_LSTM.to_directory()
+# results_restored = tune.run(
+#     "SAC",
+#     config=config_dict1,
+#     stop=stop_criteria,
+#     verbose=1,
+#     name="SAC_LSTM-Experiment_restored",
+#     local_dir="C:\\Users\\arminlotfy.DOE\\ray_results",
+#     checkpoint_at_end=True,
+#     restore=restore_path,
+#     resume="AUTO",
+#     checkpoint_freq=500,
+#     keep_checkpoints_num=3,
+#     checkpoint_score_attr="episode_reward_mean",
+#     log_to_file=True,
+#     callbacks=[CSVLoggerCallback()]
+# )
 
 
 results2 = tune.run(
@@ -762,10 +787,10 @@ results6 = tune.run(
 ###########################################################################################################
 ###########################################################################################################
 
-best_trial_SAC_LSTM = results1.get_best_trial(metric="episode_reward_mean", mode="max")
-best_trial_SAC      = results2.get_best_trial(metric="episode_reward_mean", mode="max")
-best_trial_PPO_LSTM = results5.get_best_trial(metric="episode_reward_mean", mode="max")
-best_trial_PPO      = results6.get_best_trial(metric="episode_reward_mean", mode="max")
+best_trial_SAC_LSTM     = results1.get_best_trial(metric="episode_reward_mean", mode="max")
+best_trial_SAC          = results2.get_best_trial(metric="episode_reward_mean", mode="max")
+best_trial_PPO_LSTM     = results5.get_best_trial(metric="episode_reward_mean", mode="max")
+best_trial_PPO          = results6.get_best_trial(metric="episode_reward_mean", mode="max")
 
 # To get the checkpoint directory:
 best_checkpoint_SAC_LSTM = results1.get_best_checkpoint(
@@ -773,6 +798,7 @@ best_checkpoint_SAC_LSTM = results1.get_best_checkpoint(
     metric="episode_reward_mean",
     mode="max"
 )
+
 
 best_checkpoint_SAC = results2.get_best_checkpoint(
     best_trial_SAC ,
@@ -838,7 +864,7 @@ class MyEvalEnv(Env):
         self.helper_current     = butter_lowpas_filter(self.i_dc_estimate, 0.00637, 1, order=1)
 
         # Deining Buffers
-        self.buffer = deque(maxlen=60)
+        self.buffer = deque(maxlen=3)
         self.current_buffer = deque(maxlen=10)
 
         # History
@@ -1014,14 +1040,21 @@ class MyEvalEnv(Env):
         r_counter = 5 + np.log(10* self.step_count/abs(self.end_counter)) if self.step_count > 0 else 0
         self.R_count.append(r_counter)
 
-        reward_temp = r_current + r_distance + r_capacity + r_current_a
+        # reward_temp = r_current + r_distance + r_capacity + r_current_a
 
-        reward = float(np.clip(reward_temp, -1e3, 1e4)) #if self.truncated == False else -abs((self.step_count + self.start_idx) - \
-                                                                                                #self.end_counter) + r_current + r_capacity +  \
-                                                                                                #+ r_current_a + r_std -100
-        reward += 10 if not self.truncated else -100
+        # reward = float(np.clip(reward_temp, -1e3, 1e4)) #if self.truncated == False else -abs((self.step_count + self.start_idx) - \
+        #                                                                                         #self.end_counter) + r_current + r_capacity +  \
+        #                                                                                         #+ r_current_a + r_std -100
+        # reward += 10 if not self.truncated else -100
+        
+        reward = 10*r_current_a
+        if self.truncated :
+            reward -= 1000
+        reward += 10*(self.step_count / self.end_counter) # Reward for progress
+        if self.terminated:
+            reward += 200
+        
         self.reward.append(reward)
-
         # info section                                  
         # if self.truncated == False and self.terminated == False:
         #     self.info = {}
@@ -1295,11 +1328,28 @@ plt.tight_layout()
 plt.show()
 
 ################################ testing Algo ( testing and training ENV must be the same) ##################
+
+#################Loading the trained agent from checkpoint ##########################
+# import ray
+# from ray.rllib.algorithms.sac import SAC
+# from ray.rllib.algorithms.algorithm import Algorithm
+# import faulthandler, sys
+
+# # --- Fix for IPython/Jupyter faulthandler issue ---
+# faulthandler.enable(file=sys.__stdout__)
+
+# # --- Start Ray ---
+# ray.init(ignore_reinit_error=True, log_to_driver=False)
+
+# # --- Path to your checkpoint directory ---
+# checkpoint_path = "/home/armin/ray_results/SAC-LSTM-Experimente-newReward/SAC_MyCustomEnv_566e6_00000_0_2025-07-14_16-23-00/checkpoint_000040"
+
+# # --- Load the agent ---
+# algo_SAC_LSTM = SAC.from_checkpoint(checkpoint_path)
+######################################################################################
+
 from ray.rllib.algorithms.sac import SAC
 from ray.rllib.algorithms.ppo import PPO
-
-
-
 
 checkpoint_path_1 = best_checkpoint_SAC_LSTM.path
 algo_SAC_LSTM = SAC.from_checkpoint(checkpoint_path_1)
@@ -1403,11 +1453,12 @@ ax[1].legend()
 ax[0].grid(True)
 ax[1].grid(True)
 plt.show() 
+plt.close('all')
 
 # REWARD SECTION
 plt.figure(figsize=(10, 6))
 # plt.plot(info_hist_SAC_LSTM['STD']                  , label='STD'           , color='red')
-plt.plot(info_hist_SAC_LSTM['r_current']            , label='r_current'     , color='black')
+# plt.plot(info_hist_SAC_LSTM['r_current']            , label='r_current'     , color='black')
 plt.plot(info_hist_SAC_LSTM['r_capacity']           , label='r_capacity'    , color='blue')
 plt.plot(info_hist_SAC_LSTM['r_current_a']          , label='r_current_a'   , color='green')
 # plt.plot(info_hist_SAC_LSTM['r_distance']           , label='r_distance'    , color='gold')
@@ -1418,6 +1469,7 @@ plt.ylabel('Amplitude')
 plt.legend()
 plt.grid()
 plt.show() 
+plt.close('all')
 
 # ACTION SECTION
 plt.figure(figsize=(10, 6))
@@ -1431,7 +1483,7 @@ plt.ylabel('Amplitude')
 plt.legend()
 plt.grid()
 plt.show() 
-
+plt.close('all')
 
 obs, info = env2.reset()
 done = False
