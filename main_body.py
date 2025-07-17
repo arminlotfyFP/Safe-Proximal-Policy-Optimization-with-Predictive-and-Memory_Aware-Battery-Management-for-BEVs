@@ -173,6 +173,7 @@ class MyGymEnv(Env):
         # Deining Buffers
         self.buffer = deque(maxlen=3)
         self.current_buffer = deque(maxlen=3)
+        self.std_buffer = deque(maxlen=3)
 
         # History
         self.dt                 = 1
@@ -273,7 +274,8 @@ class MyGymEnv(Env):
         return self.state, {}
 
     def step(self, in_current):
-        self.battery_current    = float(in_current)
+        self.buffer.append(float(in_current))
+        self.battery_current    = np.mean(self.buffer) if len(self.buffer) > 2 else 0.0
         self.SC_current         = self.input_current - self.battery_current
         battery_current_cell    = self.battery_current/self.n_batt_par
         SC_current_cell         = self.SC_current/1 # We do not have parallel SCs in this case  
@@ -329,15 +331,21 @@ class MyGymEnv(Env):
 
         #Derivative current
         self.current_buffer.append(self.battery_current)
-        r_current_a = -50*abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 2 else 0
+        r_current_a_temp = -50*abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 2 else 0
+        self.std_buffer.append(r_current_a_temp)
+        r_current_a = np.clip(np.mean(self.std_buffer) if len(self.std_buffer) > 2 else 0,-1000,0)
 
-        reward = r_current_a
+
+
+
+
+        reward = 0.0
         if self.truncated :
             reward -= 1000
         reward += 10*(self.step_count / self.end_counter) # Reward for progress
         if self.terminated:
             reward += 200
-        reward_cc = np.clip(10 * -((abs(self.battery_current) - abs(self.SC_current))/ (sum_current +0.1)),-1000,1) # Reward for balancing the current
+        reward_cc = np.clip(10 * -((abs(self.battery_current) - abs(self.SC_current))/ (sum_current +0.1)),-1000,0) # Reward for balancing the current
         self.R_std.append(reward_cc)
         reward +=reward_cc
 
@@ -389,23 +397,23 @@ register_env("MyCustomEnv", lambda config: MyGymEnv(config))
 # --------- RLlib SAC-LSTM CONFIGURATION -----------
 
 config_dict1 = {
-    "log_level": "ERROR",
-    "framework": "torch",   # <--- change to torch
-    "num_workers": 10,
-    "num_gpus": 0,          # Set to 0 if you don't have a GPU
+    "log_level"         : "ERROR",
+    "framework"         : "torch",   # <--- change to torch
+    "num_workers"       : 10,
+    "num_gpus"          : 0,          # Set to 0 if you don't have a GPU
     "num_envs_per_worker": 5,
-    "actor_lr": 1e-3,
-    "critic_lr": 1e-3,
-    "alpha_lr": 1e-3,
-    "gamma": 0.90,  # Discount factor
-    "normalize_actions": True,
+    "gamma"             : tune.uniform(0.90, 0.99),
+    "actor_lr"          : tune.loguniform(1e-5, 1e-3),
+    "critic_lr"         : tune.loguniform(1e-5, 1e-3),
+    "alpha_lr"          : tune.loguniform(1e-5, 1e-3),
+    "normalize_actions" : True,
     "normalize_observations": True,
-    "clip_rewards": False,
-    "target_entropy": "auto",
-    "entropy_coeff": "auto",  # Automatically adjust entropy coefficient
-    "explore": True,  # Enable exploration
+    "clip_rewards"      : False,
+    "target_entropy"    : "auto",
+    "entropy_coeff"     : "auto",  # Automatically adjust entropy coefficient
+    "explore"           : True,  # Enable exploration
     "rollout_fragment_length": 75,   # Must be >= max_seq_len
-    "train_batch_size": 1024,         # To hold multiple sequences
+    "train_batch_size"  : 1024,         # To hold multiple sequences
     "logger_config": {
         "type": TBXLogger,  # Ensures TensorBoard logging
     },
@@ -635,7 +643,7 @@ warnings.filterwarnings("ignore")
 
 # --------- TRAINING -----------
 stop_criteria = {
-    "training_iteration": 5_000, # Set a high number for iterations
+    "training_iteration": 10_000, # Set a high number for iterations
     "episode_reward_mean": -10,    # Stop when mean reward reaches 200
 }
 
@@ -648,20 +656,39 @@ stop_criteria_PPO = {
 from ray.tune.logger import TBXLogger
 from ray.tune.logger import pretty_print
 from ray.tune.logger import CSVLoggerCallback
+from ray import tune
+from ray.tune.search.optuna import OptunaSearch
+from ray.tune.schedulers import ASHAScheduler
+
+search_alg = OptunaSearch(
+    metric="episode_reward_mean", 
+    mode="max"
+)
+
+scheduler = ASHAScheduler(
+    max_t=300,              # max training iterations
+    grace_period=20,        # don't stop early before this
+    reduction_factor=3,
+    metric="episode_reward_mean",
+    mode="max"
+)
 
 results1 = tune.run(
     "SAC",
     config=config_dict1,
     stop=stop_criteria,
     verbose=1,
-    name="SAC-LSTM-Experimente-FINAL",
     local_dir="~/SAC_results",
     checkpoint_at_end=True,                      # Save a checkpoint at the end
-    checkpoint_freq=500,                           # Checkpoint every 5 iterations
+    checkpoint_freq=5,                           # Checkpoint every 5 iterations
     keep_checkpoints_num=3,                      # Keep only top 3
     checkpoint_score_attr="episode_reward_mean", # Use max episode return for ranking
-    log_to_file=True,  
-    callbacks=[CSVLoggerCallback()] 
+    callbacks=[CSVLoggerCallback()],
+    num_samples=20,
+    search_alg=search_alg,
+    scheduler=scheduler,
+    name="SAC_LSTM_OptunaASHA",
+    log_to_file=True
 )
 
 # best configuration
@@ -851,8 +878,8 @@ class MyEvalEnv(Env):
 
         # Deining Buffers
         self.buffer = deque(maxlen=3)
-        self.current_buffer = deque(maxlen=10)
-
+        self.current_buffer = deque(maxlen=3)
+        self.std_buffer = deque(maxlen=3)
         # History
         self.dt                 = 0.1
         self.V_hist             = []
@@ -954,7 +981,8 @@ class MyEvalEnv(Env):
         return self.state, {}
 
     def step(self, action):
-        self.battery_current    = float(action)
+        self.buffer.append(float(action))
+        self.battery_current    = np.mean(self.buffer) if len(self.buffer) > 2 else 0.0
         self.SC_current         = self.input_current - self.battery_current
         battery_current_cell    = self.battery_current/self.n_batt_par
         SC_current_cell         = self.SC_current/1 # We don not have parallel SCs in this case  
@@ -1015,16 +1043,11 @@ class MyEvalEnv(Env):
         r_capacity = -1000 * abs(self.battery_capacity - Q)
         self.R_capacity.append(r_capacity)
 
+        #Derivative current
         self.current_buffer.append(self.battery_current)
-        r_current_a = -50*abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 2 else 0
-        self.R_current_a.append(r_current_a)
-
-        progress = np.clip(self.step_count / self.end_counter, 0.0, 1.0)
-        r_distance = 100* (progress**2)
-        self.R_distance.append(r_distance)
-
-        r_counter = 5 + np.log(10* self.step_count/abs(self.end_counter)) if self.step_count > 0 else 0
-        self.R_count.append(r_counter)
+        r_current_a_temp = -50*abs(self.current_buffer[-1] - self.current_buffer[0]) if len(self.current_buffer) > 2 else 0
+        self.std_buffer.append(r_current_a_temp)
+        r_current_a = np.clip(np.mean(self.std_buffer) if len(self.std_buffer) > 2 else 0,-1000,0)
 
         # reward_temp = r_current + r_distance + r_capacity + r_current_a
 
@@ -1058,7 +1081,7 @@ class MyEvalEnv(Env):
         'SC_I_history'          : self.SC_I_hist,
         'requested_I_history'   : self.requested_I_hist,
         'provided_I_history'    : self.provided_I_hist,
-        "balancer"                   : self.R_std,
+        "balancer"              : self.R_std,
         "r_current"             : self.R_current,
         "r_capacity"            : self.R_capacity,
         "r_current_a"           : self.R_current_a,
@@ -1388,7 +1411,7 @@ eval_config4["env_config"] = {
 
 
 # Instantiate the environment manually (for step-by-step evaluation)
-env1 = MyGymEnv(eval_config1["env_config"])
+env1 = MyEvalEnv(eval_config1["env_config"])
 env2 = MyEvalEnv(eval_config2["env_config"])
 env3 = MyEvalEnv(eval_config3["env_config"])
 env4 = MyEvalEnv(eval_config4["env_config"])
