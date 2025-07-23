@@ -153,6 +153,8 @@ class MyGymEnv(Env):
         self.i_dc_estimate      = config.get("i_dc_estimate", np.zeros(1000))
         self.i_dc_future        = config.get("i_dc_future", np.zeros(1000))
         self.max_steps          = config.get("max_steps", 8000)
+        self.prog_gain          = config.get("prog_gain", 40)
+        self.balanc_gain        = config.get("balanc_gain", 100)
         # shuffle_indices         = np.random.permutation(len(self.i_dc_estimate_org))  # get shuffled order
         # self.i_dc_estimate      = self.i_dc_estimate_org[shuffle_indices]
         # self.i_dc_future        = self.i_dc_future_org[shuffle_indices] 
@@ -327,7 +329,7 @@ class MyGymEnv(Env):
         r_current = -10*abs(sum_current-self.input_current) 
 
         #Capacity
-        r_capacity = -1000 * abs(self.battery_capacity - Q)
+        r_capacity = -100 * abs(self.battery_capacity - Q)
 
         #Derivative current
         self.current_buffer.append(self.battery_current)
@@ -339,15 +341,22 @@ class MyGymEnv(Env):
 
 
 
-        reward = 0.0
+        reward = r_capacity
         if self.truncated :
             reward -= 1000
-        reward += 10*(self.step_count / self.end_counter) # Reward for progress
+        reward += self.prog_gain*(self.step_count / self.end_counter) # Reward for progress
         if self.terminated:
             reward += 200
-        reward_cc = np.clip(10 * -((abs(self.battery_current) - abs(self.SC_current))/ (sum_current +0.1)),-1000,0) # Reward for balancing the current
-        self.R_std.append(reward_cc)
-        reward +=reward_cc
+        
+        # if self.SC_pack_voltage > 110:
+        #     reward_cc = np.clip(-self.balanc_gain * (1 - abs(self.SC_current / (sum_current + 0.1))), -1000, 0)
+        # elif self.SC_pack_voltage < 70:
+        #     reward_cc = np.clip(-self.balanc_gain * abs(self.SC_current / (sum_current + 0.1)), -1000, 0)
+        # else:
+        #     reward_cc = 0.1
+
+        # self.R_std.append(reward_cc)
+        # reward +=reward_cc
 
         self.reward.append(reward)
         assert not np.isnan(self.state).any(), "NaN in observation"
@@ -401,11 +410,11 @@ config_dict1 = {
     "framework"         : "torch",   # <--- change to torch
     "num_workers"       : 10,
     "num_gpus"          : 0,          # Set to 0 if you don't have a GPU
-    "num_envs_per_worker": 5,
-    "gamma"             : tune.uniform(0.90, 0.99),
-    "actor_lr"          : tune.loguniform(1e-5, 1e-3),
-    "critic_lr"         : tune.loguniform(1e-5, 1e-3),
-    "alpha_lr"          : tune.loguniform(1e-5, 1e-3),
+    "num_envs_per_worker": 8,
+    "gamma"             : 0.98,
+    "actor_lr"          : 1e-3,
+    "critic_lr"         : 1e-3,
+    "alpha_lr"          : 1e-3,
     "normalize_actions" : True,
     "normalize_observations": True,
     "clip_rewards"      : False,
@@ -421,7 +430,9 @@ config_dict1 = {
     "env_config": {
         "i_dc_estimate": i_dc_estimate,   # these should be defined in your script!
         "i_dc_future": i_dc_future,
-        "max_steps": len(i_dc_estimate),  # or any other per-episode limit you want
+        "max_steps": len(i_dc_estimate),
+        "prog_gain": tune.randint(1, 201),
+        "balanc_gain": tune.randint(1, 201),  # or any other per-episode limit you want
     },
     "rl_module": {
         "model_config": {
@@ -666,8 +677,8 @@ search_alg = OptunaSearch(
 )
 
 scheduler = ASHAScheduler(
-    max_t=300,              # max training iterations
-    grace_period=20,        # don't stop early before this
+    max_t=10_000,              # max training iterations-
+    grace_period=500,        # don't stop early before this
     reduction_factor=3,
     metric="episode_reward_mean",
     mode="max"
@@ -684,8 +695,6 @@ results1 = tune.run(
     keep_checkpoints_num=3,                      # Keep only top 3
     checkpoint_score_attr="episode_reward_mean", # Use max episode return for ranking
     callbacks=[CSVLoggerCallback()],
-    num_samples=20,
-    search_alg=search_alg,
     scheduler=scheduler,
     name="SAC_LSTM_OptunaASHA",
     log_to_file=True
@@ -862,6 +871,8 @@ class MyEvalEnv(Env):
         self.i_dc_estimate      = config.get("i_dc_estimate", np.zeros(1000))
         self.i_dc_future        = config.get("i_dc_future", np.zeros(1000))
         self.max_steps          = config.get("max_steps", 8000)
+        self.prog_gain          = config.get("prog_gain", 40)
+        self.balanc_gain        = config.get("balanc_gain", 100)
         
         self.observation_space = spaces.Box(low=np.array([-1.5, -1.5, -1.5, 0, 0, 0]), 
                                             high=np.array([1.5,  1.5,  1.5, 1, 1, 1]), 
@@ -982,7 +993,7 @@ class MyEvalEnv(Env):
 
     def step(self, action):
         self.buffer.append(float(action))
-        self.battery_current    = np.mean(self.buffer) if len(self.buffer) > 2 else 0.0
+        self.battery_current    = np.mean(self.buffer) if len(self.buffer) > 1 else 0.0
         self.SC_current         = self.input_current - self.battery_current
         battery_current_cell    = self.battery_current/self.n_batt_par
         SC_current_cell         = self.SC_current/1 # We don not have parallel SCs in this case  
@@ -1056,16 +1067,22 @@ class MyEvalEnv(Env):
         #                                                                                         #+ r_current_a + r_std -100
         # reward += 10 if not self.truncated else -100
         
-        reward = r_current_a
+        reward = r_capacity
         if self.truncated :
             reward -= 1000
-        reward += 10*(self.step_count / self.end_counter) # Reward for progress
+        reward += self.prog_gain*(self.step_count / self.end_counter) # Reward for progress
         if self.terminated:
             reward += 200
-        reward_cc = np.clip(10 * -((abs(self.battery_current) - abs(self.SC_current))/ (sum_current +0.1)),-1000,1) # Reward for balancing the current
+        
+        if self.SC_pack_voltage > 110:
+            reward_cc = np.clip(-self.balanc_gain * (1 - abs(self.SC_current / (sum_current + 0.1))), -1000, 0)
+        elif self.SC_pack_voltage < 70:
+            reward_cc = np.clip(-self.balanc_gain * abs(self.SC_current / (sum_current + 0.1)), -1000, 0)
+        else:
+            reward_cc = 0.1
+
         self.R_std.append(reward_cc)
         reward +=reward_cc
-
 
         self.reward.append(reward)
         # info section                                  
@@ -1471,9 +1488,9 @@ plt.close('all')
 # REWARD SECTION
 plt.figure(figsize=(10, 6))
 plt.plot(info_hist_SAC_LSTM['balancer']                  , label='balancer'           , color='red')
-# plt.plot(info_hist_SAC_LSTM['r_current']            , label='r_current'     , color='black')
+plt.plot(info_hist_SAC_LSTM['reward']            , label='reward'     , color='black')
 plt.plot(info_hist_SAC_LSTM['r_capacity']           , label='r_capacity'    , color='blue')
-plt.plot(info_hist_SAC_LSTM['r_current_a']          , label='r_current_a'   , color='green')
+# plt.plot(info_hist_SAC_LSTM['r_current_a']          , label='r_current_a'   , color='green')
 # plt.plot(info_hist_SAC_LSTM['r_distance']           , label='r_distance'    , color='gold')
 plt.title('Reward monitoring')
 # fig.suptitle('Reward monitoring')
