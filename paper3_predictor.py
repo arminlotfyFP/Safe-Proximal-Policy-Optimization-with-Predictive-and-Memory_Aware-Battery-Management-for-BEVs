@@ -270,7 +270,7 @@ for name in NNt.keys():
     with open(f"optuna_study_{name}.pkl", "wb") as f:
         pickle.dump(study, f)
 
-    print(f"✅ Finished {name}")
+    print(f"Finished {name}")
     print("Best hyperparameters:", study.best_params)
     print("Best value:", study.best_value)
     print("-" * 50)
